@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">BasicRxJavaSample</string>
+    <string name="update_user">Update username</string>
+    <string name="accessibility_service_description">指令自动输入</string>
+</resources>

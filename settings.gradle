@@ -1,0 +1,30 @@
+// settings.gradle
+pluginManagement {
+    repositories {
+        maven { url 'https://maven.aliyun.com/repository/google' }
+        maven { url 'https://maven.aliyun.com/repository/central' }
+        maven { url 'https://maven.aliyun.com/repository/public' }
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+dependencyResolutionManagement {
+    // 修改为允许项目仓库
+    repositoriesMode.set(RepositoriesMode.PREFER_PROJECT)
+    // 或者完全禁用此检查
+    // repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
+    
+    repositories {
+        maven { url 'https://maven.aliyun.com/repository/google' }
+        maven { url 'https://maven.aliyun.com/repository/central' }
+        maven { url 'https://maven.aliyun.com/repository/public' }
+        google()
+        mavenCentral()
+        maven { url 'https://jitpack.io' }
+    }
+}
+
+rootProject.name = "BasicRxJavaSample"
+include ':app'

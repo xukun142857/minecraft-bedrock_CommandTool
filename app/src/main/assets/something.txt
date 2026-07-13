@@ -1,0 +1,273 @@
+[WARN] 
+本软件中所有生成到内部存储的文件均在 /storage/emulated/0/Android/data/command.plus/files/ 下方的不同目录
+[END]
+
+[TITLE] 脚本自动化操作指南 [END]
+
+[WARN] 请务必授予“管理所有文件”权限及“无障碍服务”权限，否则脚本无法驱动自动点击。 [END]
+
+[SECTION] 一、 指令文件格式 [END]
+[DESC] 脚本会扫描文件中的特定首行标志。指令需带'/'并包裹在标志对中。 [END]
+
+[SECTION] 1. 命令方块模式 [END]
+[MARK] $A,B,C [END]
+[DESC] A: 模式(0~2), B: 条件(0~1), C: 红石(0~1)。 [END]
+
+[SECTION] 2. 聊天栏模式 [END]
+[MARK] $T,A [END]
+[DESC] T 为固定头，A 代表是否自动执行输入(0~1)。 [END]
+
+[SECTION] 3. 固定结尾标志 [END]
+[MARK] $ [END]
+[DESC] 如果不写则包裹在里面的指令无法被识别。 [END]
+
+[CODE]
+$0,1,0
+/say Hello Minecraft
+$
+$T,1
+/say Hello
+$
+[END]
+
+[SECTION] 二、 脚本控制逻辑 [END]
+
+[WARN] 我的默认脚本只是针对我的配置(最小宽度420dp)，所有坐标请自己测量。
+如果你实在用不懂，可以尝试寻找其他指令自动输入软件，不必要死磕。 [END]
+
+[CODE]
+.exeAction(x, y, x1, y1, time)
+[END]
+[DESC] 执行点击或滑动。参数依次为：起点X, 起点Y, 终点X, 终点Y, 持续毫秒。 [END]
+
+[CODE]
+.sleep(ms)
+[END]
+[DESC] 脚本暂停。例如 .sleep(1000) 暂停1秒。 [END]
+
+[CODE]
+.setText(expr)
+[END]
+[DESC] 输入文字，支持变量拼接。例如 .setText("当前任务:" + $ItemText) [END]
+
+[CODE]
+.setVar(name, expr)
+[END]
+[DESC] 将没有值的指定变量(name)设置为某个值(expr)。例如 .setVar(val1, 55) [END]
+
+[CODE]
+.addVar(name, num)
+[END]
+[DESC] 将已有数值类变量(name)增加某个数(num)。例如 .addVar(val1, 11) [END]
+
+[CODE]
+.nextItem
+[END]
+[DESC] 切换至下一个指令项。 [END]
+
+[CODE]
+.reStart(var1, var2, ...)
+[END]
+[DESC] 保留已有值(可在重新启动的脚本继续使用)，脚本立即跳回第一行重新开始。保留的变量不会被 .setVar(...) 影响 [END]
+
+[CODE]
+.fToast(expr)
+[END]
+[DESC] 在任意界面弹出指定内容的提示(Toast)。例如 .fToast("结果: " + val1) [END]
+
+[CODE]
+.adbCmd(expr)
+[END]
+[DESC] 通过Shizuku执行adb命令。例如 .adbCmd("id") [END]
+
+[CODE]
+.if(条件)
+ ... 
+.else
+ ... 
+.end
+[END]
+[DESC] 逻辑判断。支持 $isBlockType == true 等布尔运算。此处没有死循环判断，请确保你的脚本一定会停止，否则就变成锁机了。你可以尝试让他找不到输入框焦点停止，或脚本结束也会停止。 [END]
+
+[SECTION] 三、 内置变量手册 [END]
+[VAR] $isBlockType [END] [DESC] 当前项是否为聊天栏类型。 [END]
+[VAR] $ItemText [END] [DESC] 获取当前条目的文本内容。 [END]
+[VAR] $configA / $configB / $configC [END] [DESC] 对应文件头中的 A, B, C 配置值。 [END]
+[VAR] $cmdResult [END] [DESC] 获取最近一次执行完成的 .adbCmd(...) 返回的结果。 [END]
+[VAR] $Weight [END] [DESC] 获取屏幕分辨率长度数值。 [END]
+[VAR] $Height [END] [DESC] 获取屏幕分辨率宽度数值。 [END]
+
+[TITLE]三维阵列结构（Grid String）格式说明[END]
+
+[DESC]本格式用于表示一个 Minecraft 方块的三维方块数据，核心思想是：用嵌套数组表达 X、Y、Z 三个维度。[END]
+
+[SECTION]一、整体结构[END]
+
+[DESC]数据是一个三层嵌套的数组，形式如下：[END]
+
+[CODE]
+[
+[  // 第0层 Y
+["block", "block", "block"],   // Z = 0
+["block", "block", "block"]    // Z = 1
+],
+[  // 第1层 Y
+["block", "block", "block"],
+["block", "block", "block"]
+]
+]
+[END]
+
+[DESC]
+可以理解为：
+
+- 最外层 []：Y轴（高度）
+- 中间层 []：Z轴（深度）
+- 最内层 []：X轴（宽度）
+实际上，中括号外的逗号和换行可以不写，代码只识别中括号层级顺序
+  [END]
+
+[SECTION]二、方块内容格式[END]
+
+[DESC]每一个元素是一个字符串，表示一个方块 ID，例如：[END]
+
+[CODE]
+"minecraft:stone"
+"minecraft:oak_planks"
+"minecraft:air"
+[END]
+
+[DESC]
+说明：
+
+- 必须是字符串（带引号）
+- 可以包含前缀编码用于表示朝向（例如up_表示方块朝上，这个只是默认规则，可视情况编写映射规则）
+- 如果为空或无效，会默认视为 minecraft:air
+  [END]
+
+[SECTION]三、简单示例[END]
+
+[DESC]一个 2*2*2 的结构：[END]
+
+[CODE]
+[
+[
+["minecraft:stone", "minecraft:dirt"],
+["minecraft:grass_block", "minecraft:air"]
+],
+[
+["minecraft:oak_planks", "minecraft:glass"],
+["minecraft:air", "minecraft:stone"]
+]
+]
+[END]
+
+[DESC]
+对应空间：
+
+- 宽度（X）= 2
+- 深度（Z）= 2
+- 高度（Y）= 2
+  [END]
+  
+  
+[TITLE]建筑结构编译器控制脚本编写手册[END]
+[DESC]本编译器采用行文本解析机制与局部有限状态机（FSM）逻辑。脚本通过特定前缀符号来区分“规则定义”、“配置切换”与“游戏命令”。所有指令均对大小写不敏感（除特别说明外）。[END]
+
+[SECTION]一、 控制指令分类与语法规范[END]
+
+[MARK]1. 区域声明与配置切换（$ 标记）[END]
+控制脚本中的命令块必须放置在明确声明的配置区间内，未处于配置区间内的游戏命令将被安全忽略。
+
+[VAR]开启/切换区间：[END] [CODE]$A,B,C[END]
+[DESC]语法：$ 符号后紧跟三个由英文逗号分隔的整数。[END]
+参数含义：
+* [MARK]A (方块类型):[END] 0 代表 循环命令块 (Repeating)；2 代表 脉冲命令块 (Impulse)；其他任意整数（如 1）代表 连锁命令块 (Chain)。
+* [MARK]B (条件制约):[END] 0 代表 无条件 (Unconditional)；1 代表 条件制约 (Conditional)。
+* [MARK]C (红外控制):[END] 0 代表 保持开启 (Always Active)；1 代表 需要红石 (Needs Redstone)。
+
+[DESC]示例：$1,0,0 表示后续生成的方块全部为 无条件、保持开启的连锁命令块。[END]
+
+[VAR]显式闭合区间：[END] [CODE]$[END]
+[DESC]语法：单独一行的 $。[END]
+[DESC]含义：立刻关闭当前区间。后续的方块生成被暂停，直到遇到下一个配置声明。同时内部配置恢复为默认值（脉冲、无条件、需要红石）。[END]
+
+[MARK]2. 状态机动态规则定义（#state 与 #rule 标记）[END]
+用于在方块延伸到特定位置或数量时，动态改变方向、步进向量或跳转逻辑。
+
+[VAR]状态域声明：[END] [CODE]#state <状态名称>[END]
+[DESC]含义：声明接下来的 #rule 属于哪一个状态域。默认状态域为 default。[END]
+
+[VAR]动态规则定义：[END] [CODE]#rule <判断轴> <操作符> <目标值> -> <触发动作>[END]
+[MARK]判断轴：[END]
+* [VAR]X / Y / Z:[END] 判断下一个投影（预生成）方块的绝对坐标。
+* [VAR]COUNT:[END] 判断当前已累计生成的方块总数（从 1 开始计数）。
+
+[MARK]操作符：[END] 支持 >=, <=, >, <, =, ==。
+
+[MARK]触发动作（空格分隔的键值对 key:value）：[END]
+* [VAR]face:<方向>:[END] 覆盖当前方块朝向。可选值：DOWN, UP, NORTH, SOUTH, WEST, EAST。
+* [VAR]step:<X,Y,Z>:[END] 本次放置完方块后，坐标立即累加此向量。
+* [VAR]next:<X,Y,Z>:[END] 从下一次开始，全局的默认步进向量更改为 X,Y,Z。
+* [VAR]state:<新状态名>:[END] 状态机当前运行状态立刻转移到目标状态。
+
+[DESC]示例：#rule X >= 16 -> face:EAST step:0,1,0 next:0,1,0 state:layer2[END]
+
+[WARN]核心生命周期隔离机制（重点）：
+编译器具备“前后物理隔离”保护。如果在当前作用域内已经开始放置方块（即出现了 / 开头的行），此时一旦再次遇到 #state 或 #rule 指令，编译器将彻底清空并重置所有已定义的规则库，且运行期当前状态重置为 default。因此，建议将全篇涉及的所有规则定义统一写在脚本的最顶端，或确保规则定义与方块放置在逻辑上完全分段。[END]
+
+[MARK]3. 基础位置与静态向量修改（# 静态标记）[END]
+用于初始化或手动修正编译器的空间指针，属于静态指令，不受状态机规则影响。
+[CODE]#step <X> <Y> <Z>[END] [DESC]修改默认的步进向量。默认初始值为 0 1 0（向上）。[END]
+[CODE]#face <MODE>[END] [DESC]修改默认的朝向模式。可选具体方向大写字母，或设为 AUTO（自动匹配步进方向）。[END]
+[CODE]#goto <X> <Y> <Z>[END] [DESC]将当前生成器坐标指针强制移动到绝对坐标 (X, Y, Z)。[END]
+[CODE]#shift <X> <Y> <Z>[END] [DESC]将当前生成器坐标指针在当前基础上相对偏移 (X, Y, Z)。[END]
+[CODE]#align <目标修改轴> <相对偏移量> [参照轴1=绝对值1] [参照轴2=绝对值2][END] [DESC]用于以某一个轴为基准进行相对偏移（对齐）的同时，将其他非目标轴快速初始化或重置为绝对坐标值。[END]
+
+[MARK]4. 游戏命令放置（/ 标记）[END]
+[VAR]语法：[END] [CODE]/ <Minecraft原生命令>[END]
+[DESC]含义：实际在结构中生成一个命令块。若该行未处于激活的 $ 区间内，该行将被直接无视。[END]
+
+[SECTION]二、 运行期逻辑执行顺序[END]
+当编译器读入一行 / 开头的命令时，其内部执行逻辑如下：
+1. [MARK]区间校验：[END] 检查当前开关，若未开启区间则直接丢弃该行。
+2. [MARK]激活隔离锁：[END] 标记当前作用域内已放置方块。
+3. [MARK]计算投影坐标：[END] 计算出下一个预测坐标 (nextProjX, nextProjY, nextProjZ)。
+4. [MARK]规则匹配：[END] 检索当前状态规则，一旦匹配成功，立刻中断后续规则检索（单一触发）。
+5. [MARK]确定朝向与属性：[END] 优先采用规则覆盖的属性，否则使用全局设定。
+6. [MARK]写入结构：[END] 将命令内容及 NBT 数据封装并计入当前绝对坐标。
+7. [MARK]坐标与状态跃迁：[END] 根据是否触发规则，累加对应的步进向量并进行状态跃迁。
+
+[SECTION]三、 切片与导出规则[END]
+1. [MARK]自动网格划分：[END] 编译器根据配置的 limitX 和 limitZ 尺寸（默认 64），自动划分到二维切片网格中。
+2. [MARK]空气对角线补偿：[END] 为防止导出的 .mcstructure 文件整体长宽高拉伸变形，编译器会自动在检测到端点缺失方块时补充 [VAR]minecraft:air[END] 方块，确保导入游戏时的结构对齐。
+3. [MARK]命名输出：[END] 每个切片单独导出，格式为：[CODE]command_part_x{cx}_z{cz}.mcstructure[END]
+
+[SECTION]四、 脚本编写标准示例[END]
+[CODE]
+# 1. 规则声明区
+#rule COUNT == 10 -> face:EAST step:1,0,0 next:1,0,0 state:phase2  
+  
+#state phase2  
+#rule X >= 5 -> face:UP step:0,1,0 next:0,1,0 state:default  
+
+# 2. 初始化环境指针  
+#goto 0 0 0  
+#face AUTO  
+#step 0 0 1  
+  
+# 3. 配置区间与方块放置  
+$0,0,0  
+/say 执行核心进程第 1 步  
+/....
+/say 执行核心进程第 10 步（触发规则1）  
+$
+
+# 换层逻辑：Z轴相对移动1格，同时将X和Z轴对齐回绝对坐标0点(不写的默认为零)
+#align Z 1 X=0
+
+$1,0,0  
+/say 执行核心进程第 11 步  
+/say 执行核心进程第 13 步（触发规则2）  
+$
+[END]

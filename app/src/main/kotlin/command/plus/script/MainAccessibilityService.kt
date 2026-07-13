@@ -314,41 +314,45 @@ class MainAccessibilityService : AccessibilityService(),
     }
 
     private fun showChangeSetDialog() {
-        try {
-            val ctx = ContextThemeWrapper(applicationContext, androidx.appcompat.R.style.Theme_AppCompat_Light_Dialog)
-            val builder = AlertDialog.Builder(ctx)
-            builder.setTitle("加载指令文件")
+    try {
+        // 如果你在 Service 内部，直接用 this 代替 applicationContext
+        val ctx = ContextThemeWrapper(this, androidx.appcompat.R.style.Theme_AppCompat_Light_Dialog)
+        val builder = AlertDialog.Builder(ctx)
+        builder.setTitle("加载指令文件")
 
-            val input = EditText(ctx).apply {
-                hint = "/sdcard/Download/data.txt"
-            }
-            builder.setView(input)
-
-            builder.setPositiveButton("确定") { _, _ ->
-                val path = input.text.toString()
-                try {
-                    DataManager.loadFromFile(path) // 适配单例
-                    updateInfoDisplay()
-                    FloatToast.show(applicationContext, "集合已加载: ${DataManager.getTotalSize()}")
-                } catch (e: Exception) {
-                    FloatToast.show(applicationContext, "加载失败: ${e.message}")
-                }
-            }
-            builder.setNegativeButton("取消", null)
-
-            builder.create().apply {
-                window?.setType(
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) 
-                        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY 
-                    else 
-                        WindowManager.LayoutParams.TYPE_PHONE
-                )
-                show()
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
+        // 注意：在没有 Activity 窗口的 Context 下，有时候直接 new EditText 会有问题
+        // 最好使用带有主题的 ctx
+        val input = EditText(ctx).apply {
+            hint = "/sdcard/Download/data.txt"
         }
+        builder.setView(input)
+
+        builder.setPositiveButton("确定") { _, _ ->
+            val path = input.text.toString()
+            try {
+                DataManager.loadFromFile(path)
+                updateInfoDisplay()
+                FloatToast.show(applicationContext, "集合已加载: ${DataManager.getTotalSize()}")
+            } catch (e: Exception) {
+                FloatToast.show(applicationContext, "加载失败: ${e.message}")
+            }
+        }
+        builder.setNegativeButton("取消", null)
+
+        val dialog = builder.create()
+        dialog.window?.let { win ->
+            win.setType(
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) 
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY 
+                else 
+                    WindowManager.LayoutParams.TYPE_PHONE
+            )
+        }
+        dialog.show()
+    } catch (e: Exception) {
+        e.printStackTrace()
     }
+}
 
     // -------------------- ActionExecutor --------------------
     override fun exeAction(x: Int, y: Int, x1: Int, y1: Int, timeMs: Long) {

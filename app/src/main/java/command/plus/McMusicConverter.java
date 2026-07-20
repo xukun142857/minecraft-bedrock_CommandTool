@@ -48,7 +48,8 @@ public class McMusicConverter {
     private String ScoreboardName = "t";
     private int StartOffset = 0;
     private int MaxChars = 10000;
-    private boolean EnableStacking = true;
+    private boolean EnableStacking = false;
+    private boolean enableExtraSensitiveOptimization = true;
     private java.util.Set<Integer> ForbiddenScores;
     private InputStream midiStream;
     
@@ -170,6 +171,7 @@ public class McMusicConverter {
         public Builder setStartOffset(int v) { inst.StartOffset = v; return this; }
         public Builder setMaxChars(int v) { inst.MaxChars = v; return this; }
         public Builder setEnableStacking(boolean v) { inst.EnableStacking = v; return this; }
+        public Builder setEnableExtraSensitiveOptimization(boolean v) { inst.enableExtraSensitiveOptimization = v; return this; }
         public Builder setForBiddenScores(java.util.Set<Integer> val) { inst.ForbiddenScores = val; return this; }
         public Builder setMidiStream(InputStream is) {
     inst.midiStream = is;
@@ -221,7 +223,7 @@ if (midiStream != null) {
             
             callback.onProgress("Saving text...", 95);
             String input = saveTextToString(simplified);
-            if (outputTxt != null) saveCommandText(input, outputTxt, ScoreboardName, StartOffset, MaxChars, EnableStacking, ForbiddenScores);
+            if (outputTxt != null) saveCommandText(input, outputTxt, ScoreboardName, StartOffset, MaxChars, EnableStacking, ForbiddenScores, enableExtraSensitiveOptimization);
             
             String summary = generateSummary(parsed, processed, simplified);
             
@@ -905,12 +907,13 @@ private Map<String, float[]> getOrBuildSampleCache(File sampleFolder, int target
         return sb.toString();
     }
     
-    public void saveCommandText(String input, File outFile, String SN, int SO, int MC, boolean ES, java.util.Set<Integer> FB)  {
+    public void saveCommandText(String input, File outFile, String SN, int SO, int MC, boolean ES, java.util.Set<Integer> FB, boolean EO)  {
         MinecraftMusicConverter conv = new MinecraftMusicConverter.Builder()
                 .setMode(0)
                 .setScoreboardName(SN)
                 .setStartOffset(SO)
                 .setEnableStacking(ES)
+                .setEnableExtraSensitiveOptimization(EO)
                 .setMaxChars(MC)
                 .setInputString(input)
                 .setForbiddenValues(FB)

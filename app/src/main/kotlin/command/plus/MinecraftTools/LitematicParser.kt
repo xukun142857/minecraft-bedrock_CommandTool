@@ -47,7 +47,7 @@ data class LitematicRegion(
     val position: LitematicVec3i,
     val size: LitematicVec3i,
     val palette: List<BlockStateDef>,
-    val blocks: Array<BlockStateRef>,
+    val blockIndices: IntArray,
     val tileEntities: List<Map<String, LitematicNbtTag>>,
     val entities: List<Map<String, LitematicNbtTag>>,
     val pendingBlockTicks: List<Map<String, LitematicNbtTag>>,
@@ -100,9 +100,11 @@ data class LitematicRegion(
     }
 
     fun getBlock(x: Int, y: Int, z: Int): BlockStateRef {
-        val idx = index(x, y, z)
-        return blocks.getOrElse(idx) { BlockStateRef(0, BlockStateDef("minecraft:air")) }
-    }
+    val idx = index(x, y, z)
+    val paletteIndex = blockIndices.getOrElse(idx) { 0 }
+    val state = palette.getOrNull(paletteIndex) ?: BlockStateDef("minecraft:air")
+    return BlockStateRef(paletteIndex, state)
+}
 
     fun getBlockAtWorld(x: Int, y: Int, z: Int): BlockStateRef? {
         val local = worldToLocal(x, y, z) ?: return null
@@ -223,11 +225,7 @@ class LitematicParser private constructor() {
             val totalBlocks = abs(size.x) * abs(size.y) * abs(size.z)
             val blockIndices = decodePaletteIndices(blockStatesLongs, palette.size, totalBlocks)
 
-            val blocks = Array(totalBlocks) { i ->
-                val paletteIndex = blockIndices.getOrElse(i) { 0 }
-                val state = palette.getOrNull(paletteIndex) ?: BlockStateDef("minecraft:air")
-                BlockStateRef(paletteIndex, state)
-            }
+           
 
             val tileEntities = region.list("TileEntities")?.value?.mapNotNull { it.asCompoundOrNull() } ?: emptyList()
             val entities = region.list("Entities")?.value?.mapNotNull { it.asCompoundOrNull() } ?: emptyList()
@@ -239,7 +237,7 @@ class LitematicParser private constructor() {
                 position = position,
                 size = size,
                 palette = palette,
-                blocks = blocks,
+                blockIndices = blockIndices,
                 tileEntities = tileEntities,
                 entities = entities,
                 pendingBlockTicks = pendingBlockTicks,

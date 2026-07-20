@@ -73,6 +73,7 @@ private val StartOffset: Int,
 private val ForbiddenScores: Set<Int>,
 private val Multiplier: Int,
 private val isAddTxt: Boolean,
+private val enableExtraSensitiveOptimization: Boolean,
 private val callback: Callback?
 ) {
 
@@ -112,6 +113,7 @@ private var StartOffset: Int = 0
 private var ForbiddenScores: Set<Int> = emptySet()
 private var Multiplier: Int = 0
 private var isAddTxt: Boolean = false
+private var enableExtraSensitiveOptimization: Boolean = true
 private var callback: Callback? = null
 
 fun setGeneratorMode(mode: GeneratorMode) = apply { this.mode = mode }    
@@ -148,6 +150,7 @@ fun setStartOffset(num: Int) = apply { this.StartOffset = num }
 fun setForbiddenScores(num: Set<Int>) = apply { this.ForbiddenScores = num }    
 fun setMultiplier(num: Int) = apply { this.Multiplier = num }    
 fun setisAddTxt(bl: Boolean) = apply { this.isAddTxt = bl }    
+fun setEnableExtraSensitiveOptimization(bl: Boolean) = apply { this.enableExtraSensitiveOptimization = bl }
 fun setGeneratePureColorPreview(enable: Boolean) = apply { this.generatePureColorPreview = enable }    
 fun setMapMappingText(text: String) = apply { this.mapMappingText = text } // 新增：允许在传统模式下也传入映射文本    
 fun setCallback(callback: Callback) = apply { this.callback = callback }    
@@ -167,7 +170,7 @@ fun build(): PixelArtGenerator {
         mode, inputImageFile, inputImageStream, outputDir!!, textureFiles, mapMappingText,    
         similarityThreshold, generatePureColorPreview, width, height, colorSpace, ditherAlgorithm, emptyBlockId,    
         Thex, They, Thez, TheMirrorh, TheMirrorv, TheObj, TheName, TheLimit, TheinnerStep, TheinnerAxis,    
-        TheouterStep, TheouterAxis, StartOffset, ForbiddenScores, Multiplier, isAddTxt, callback    
+        TheouterStep, TheouterAxis, StartOffset, ForbiddenScores, Multiplier, isAddTxt, enableExtraSensitiveOptimization, callback    
     )    
 }
 
@@ -213,7 +216,6 @@ if (!outputDir.exists()) outputDir.mkdirs()
         } else {    
             notifyProgress("正在加载方块贴图...")    
             val list = loadBlockTextures()    
-            // 【核心修改】：在传统模式下，若开启了纯色预览且传入了映射文本，则解析文本并注入对应的 HEX 颜色    
             if (generatePureColorPreview && !mapMappingText.isNullOrBlank()) {    
                 notifyProgress("正在注入纯色预览映射表...")    
                 injectHexColorsFromText(list, mapMappingText)    
@@ -257,7 +259,9 @@ if (!outputDir.exists()) outputDir.mkdirs()
             .setAxisConfig(innerAxis = TheinnerAxis, innerStep = TheinnerStep, outerAxis = TheouterAxis, outerStep = TheouterStep)    
             .setMirror(horizontal = TheMirrorh, vertical = TheMirrorv)    
             .setScoreboardObj(TheObj).setEntityName(TheName).setCharLimit(TheLimit).setOutputFile(resultTxtFile)    
-            .setStartScoreOffset(StartOffset).setForbiddenScores(ForbiddenScores).setGenerationMultiplier(Multiplier)    
+            .setStartScoreOffset(StartOffset).setForbiddenScores(ForbiddenScores)
+            .setGenerationMultiplier(Multiplier)    
+            .setEnableExtraSensitiveOptimization(enableExtraSensitiveOptimization)
             .setCallback { generatedCommands ->    
                 commandsSize = generatedCommands.count { it.contains("/") }    
             }.build().generate()    

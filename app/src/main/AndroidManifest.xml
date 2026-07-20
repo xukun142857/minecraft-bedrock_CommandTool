@@ -18,6 +18,7 @@
         android:label="指令音符盒"
         android:screenOrientation="portrait"
         android:configChanges="orientation|screenSize|uiMode"
+        android:largeHeap="true"
         android:theme="@style/AppTheme">
 
         <activity android:name=".MainActivity"
@@ -45,6 +46,11 @@
         android:name=".MusicPlaybackService"
         android:foregroundServiceType="mediaPlayback"
         android:exported="false" />
+        
+        <service
+            android:name=".CoordinatePickerService"
+            android:enabled="true"
+            android:exported="false" />
             
     <provider
             android:name="rikka.shizuku.ShizukuProvider"

@@ -88,6 +88,7 @@ import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Switch
 
 enum class AxisDirection { POSITIVE, NEGATIVE }
 
@@ -250,6 +251,7 @@ fun McStructure3DCommandScreen(
     var outerStep by rememberPreference("outerStepStr", "1", prefs)
     var startScoreOffset by rememberPreference("startScoreOffsetStr", "0", prefs)
     var forbiddenScoresText by rememberPreference("forbiddenScoresText", "6489,8964", prefs)
+    var enableExtraSensitiveOptimization by rememberPreference("enableExtraSensitiveOptimization", true, prefs)
     var generationMultiplier by rememberPreference("generationMultiplierStr", "1", prefs)
 
     var outputType by rememberPreference("outputType", "内部存储", prefs)
@@ -415,6 +417,7 @@ var skipFilterMode by rememberPreference("skipFilterMode", FilterMode.WHITELIST.
         outerStep = "1"
         startScoreOffset = "0"
         forbiddenScoresText = "6489,8964"
+        enableExtraSensitiveOptimization = true
         generationMultiplier = "1"
         outputType = "内部存储"
         outputPath = "/storage/emulated/0/McStructure3D"
@@ -534,6 +537,7 @@ val finalSkipFilterMode = runCatching { FilterMode.valueOf(skipFilterMode) }.get
                                     )
                                     .setStartScoreOffset(finalStartScoreOffset)
                                     .setForbiddenScores(parseForbiddenScores(forbiddenScoresText))
+                                    .setEnableExtraSensitiveOptimization(enableExtraSensitiveOptimization)
                                     .setGenerationMultiplier(finalGenerationMultiplier)
                                     .setMappingJsonRules(mappingJson)
                                     .setBedrockTargetVersion(bedrockVersion.trim())
@@ -651,7 +655,9 @@ val finalSkipFilterMode = runCatching { FilterMode.valueOf(skipFilterMode) }.get
                 generationMultiplier = generationMultiplier,
                 onGenerationMultiplierChange = { generationMultiplier = it },
                 forbiddenScoresText = forbiddenScoresText,
-                onForbiddenScoresTextChange = { forbiddenScoresText = it }
+                onForbiddenScoresTextChange = { forbiddenScoresText = it },
+                enableExtraSensitiveOptimization = enableExtraSensitiveOptimization,
+                onEnableExtraSensitiveOptimizationChange = { enableExtraSensitiveOptimization = it }
             )
 
             AxisCard(
@@ -789,7 +795,9 @@ private fun GeneralCard(
     generationMultiplier: String,
     onGenerationMultiplierChange: (String) -> Unit,
     forbiddenScoresText: String,
-    onForbiddenScoresTextChange: (String) -> Unit
+    onForbiddenScoresTextChange: (String) -> Unit,
+    enableExtraSensitiveOptimization: Boolean,
+    onEnableExtraSensitiveOptimizationChange: (Boolean) -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -853,6 +861,16 @@ private fun GeneralCard(
                 maxLines= 5,
                 supportingText = { Text("用英文逗号分隔") }
             )
+            
+            Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("是否启用网易违禁词规避", style = MaterialTheme.typography.titleMedium)
+                        Switch(checked = enableExtraSensitiveOptimization, onCheckedChange = onEnableExtraSensitiveOptimizationChange)
+                    }
+                    
         }
     }
 }
@@ -899,20 +917,20 @@ private fun AxisCard(
             NumberField(value = innerStep, onValueChange = onInnerStepChange, label = "行进步长", modifier = Modifier.fillMaxWidth())
 
             AxisSelectorRow(
-                label = "加深轴",
+                label = "换行轴",
                 value = middleAxis,
                 options = axisOptions,
                 onValueChange = onMiddleAxisChange
             )
-            NumberField(value = middleStep, onValueChange = onMiddleStepChange, label = "加深步长", modifier = Modifier.fillMaxWidth())
+            NumberField(value = middleStep, onValueChange = onMiddleStepChange, label = "换行步长", modifier = Modifier.fillMaxWidth())
 
             AxisSelectorRow(
-                label = "最外层轴",
+                label = "换层轴",
                 value = outerAxis,
                 options = axisOptions,
                 onValueChange = onOuterAxisChange
             )
-            NumberField(value = outerStep, onValueChange = onOuterStepChange, label = "外层步长", modifier = Modifier.fillMaxWidth())
+            NumberField(value = outerStep, onValueChange = onOuterStepChange, label = "换层步长", modifier = Modifier.fillMaxWidth())
 
             Text("镜像", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {

@@ -98,46 +98,44 @@ class ScriptEngine {
     private fun registerBuiltinCommands() {
         // exeAction(x,y,x1,y1,time)
         registerCommand("exeAction", object : Command {
-    override fun execute(ctx: ExecutionContext, rawArgs: String) {
-        val parts = splitArgs(rawArgs)
-        if (parts.size < 5) return
-        try {
-            // 使用 evalInt/evalLong 代替直接 toInt()
-            val x = evalInt(parts[0], ctx)
-            val y = evalInt(parts[1], ctx)
-            val x1 = evalInt(parts[2], ctx)
-            val y1 = evalInt(parts[3], ctx)
-            val time = evalLong(parts[4], ctx)
-            
-            ctx.actionExecutor?.exeAction(x, y, x1, y1, time)
-        } catch (ignore: Exception) {}
-    }
-})
+            override fun execute(ctx: ExecutionContext, rawArgs: String) {
+                val parts = splitArgs(rawArgs)
+                if (parts.size < 5) return
+                try {
+                    val x = evalInt(parts[0], ctx)
+                    val y = evalInt(parts[1], ctx)
+                    val x1 = evalInt(parts[2], ctx)
+                    val y1 = evalInt(parts[3], ctx)
+                    val time = evalLong(parts[4], ctx)
+                    
+                    ctx.actionExecutor?.exeAction(x, y, x1, y1, time)
+                } catch (ignore: Exception) {}
+            }
+        })
 
         // sleep(ms)
         registerCommand("sleep", object : Command {
-    override fun execute(ctx: ExecutionContext, rawArgs: String) {
-        val s = rawArgs.trim()
-        if (s.isEmpty()) return
-        try {
-            // 支持表达式计算延迟时间
-            val ms = evalLong(s, ctx)
-            
-            var waited: Long = 0
-            val chunk: Long = 100
-            while (waited < ms) {
-                if (ctx.isStopped) throw StopException()
-                val to = min(chunk, ms - waited)
-                try { Thread.sleep(to) } 
-                catch (ie: InterruptedException) { 
-                    Thread.currentThread().interrupt()
-                    throw StopException() 
-                }
-                waited += to
+            override fun execute(ctx: ExecutionContext, rawArgs: String) {
+                val s = rawArgs.trim()
+                if (s.isEmpty()) return
+                try {
+                    val ms = evalLong(s, ctx)
+                    
+                    var waited: Long = 0
+                    val chunk: Long = 100
+                    while (waited < ms) {
+                        if (ctx.isStopped) throw StopException()
+                        val to = min(chunk, ms - waited)
+                        try { Thread.sleep(to) } 
+                        catch (ie: InterruptedException) { 
+                            Thread.currentThread().interrupt()
+                            throw StopException() 
+                        }
+                        waited += to
+                    }
+                } catch (ignore: Exception) {}
             }
-        } catch (ignore: Exception) {}
-    }
-})
+        })
 
         // setText(expr)
         registerCommand("setText", object : Command {
@@ -152,11 +150,13 @@ class ScriptEngine {
                 }
                 if (!ok) {
                     ctx.listener?.onInputFieldNotFound(ctx.scriptId, text)
+                    ctx.stop() 
+                    throw StopException() 
                 }
             }
         })
 
-        // setVar(name, expr) -> 【修改】：仅在没有值的时候才设置
+        // setVar(name, expr)
         registerCommand("setVar", object : Command {
             override fun execute(ctx: ExecutionContext, rawArgs: String) {
                 val parts = splitArgs(rawArgs)
@@ -174,14 +174,13 @@ class ScriptEngine {
                     else -> strVal
                 }
                 
-                // 仅在变量不存在或为null时才赋值
                 if (!ctx.vars.containsKey(name) || ctx.vars[name] == null) {
                     ctx.vars[name] = finalVal
                 }
             }
         })
 
-        // addVar(name, num) -> 【新增】：给数字变量增加值
+        // addVar(name, num)
         registerCommand("addVar", object : Command {
             override fun execute(ctx: ExecutionContext, rawArgs: String) {
                 val parts = splitArgs(rawArgs)
@@ -191,11 +190,9 @@ class ScriptEngine {
                 if (comma < 0) return
                 val expr = rawArgs.substring(comma + 1)
                 
-                // 解析要增加的值
                 val addStr = ConcatExprEvaluator.evaluate(expr, ctx)
                 val numToAdd = addStr.trim().toDoubleOrNull() ?: 0.0
                 
-                // 获取当前变量的值（如果不存在默认当做0）
                 val currentVal = try {
                     ctx.resolveVar(name)
                 } catch (e: VariableMissingException) {
@@ -204,13 +201,11 @@ class ScriptEngine {
                 val currentNum = currentVal.toString().toDoubleOrNull() ?: 0.0
                 
                 val result = currentNum + numToAdd
-                
-                // 强制覆写变量值 (如果是个整数，去掉小数位以保持整洁)
                 ctx.vars[name] = if (result % 1.0 == 0.0) result.toLong() else result
             }
         })
 
-        // reStart(var1, var2...) -> 【修改】：携带变量名重新开始
+        // reStart(var1, var2...)
         registerCommand("reStart", object : Command {
             override fun execute(ctx: ExecutionContext, rawArgs: String) {
                 val keepVars = splitArgs(rawArgs).map { it.trim().removePrefix("$") }.filter { it.isNotEmpty() }
@@ -259,15 +254,16 @@ class ScriptEngine {
         plistener = listener
         val id = if (scriptId.isNullOrEmpty()) UUID.randomUUID().toString() else scriptId
         val vars: MutableMap<String, Any?> =
-    initialVars?.mapValues { it.value }?.toMutableMap()
-        ?: mutableMapOf()
+            initialVars?.mapValues { it.value }?.toMutableMap() ?: mutableMapOf()
         val ctx = ExecutionContext(vars, actionExecutor, textSetter, listener, id, variableProvider)
 
         val task = Runnable {
             runningContexts[id] = ctx
             runningThreads[id] = Thread.currentThread()
             try {
-                runScriptInternal(lines, ctx)
+                // 在传入核心引擎前，先将所有行中的行尾注释去除
+                val cleanLines = lines?.map { removeComments(it) }
+                runScriptInternal(cleanLines, ctx)
                 if (!ctx.isStopped) {
                     listener?.onScriptEnd(id, HashMap(ctx.vars))
                 } else {
@@ -308,23 +304,22 @@ class ScriptEngine {
             while (i < lines.size) {
                 if (ctx.isStopped) throw StopException()
                 val raw = lines[i]
-    if (raw == null) {
-        i++
-        continue
-    }
-    
-    val line = raw.trim()
-    if (!line.startsWith(".")) { 
-        i++ 
-        continue 
-    }
+                if (raw == null) {
+                    i++
+                    continue
+                }
+                
+                val line = raw.trim()
+                if (!line.startsWith(".")) { 
+                    i++ 
+                    continue 
+                }
 
-    // 修复2：处理命令名为 null 的情况
-    val cmdName = parseCommandName(line)
-    if (cmdName == null) {
-        i++
-        continue
-    }
+                val cmdName = parseCommandName(line)
+                if (cmdName == null) {
+                    i++
+                    continue
+                }
                 val cmdLower = cmdName.lowercase()
 
                 val executionEnabled = if (frameStack.isEmpty()) true else frameStack.peek().executing
@@ -376,13 +371,12 @@ class ScriptEngine {
                         } catch (vme: VariableMissingException) {
                             throw vme
                         } catch (re: RestartException) {
-                            // 【核心修改点】抓取RestartException中要求的保留变量
                             val preserved = mutableMapOf<String, Any?>()
                             for (varName in re.keepVars) {
                                 try {
                                     preserved[varName] = ctx.resolveVar(varName)
                                 } catch (e: VariableMissingException) {
-                                    // 忽略没有找到的变量
+                                    // ignore
                                 }
                             }
                             ctx.vars.clear()
@@ -396,7 +390,6 @@ class ScriptEngine {
                         }
                         if (ctx.isStopped) throw StopException()
                     } else {
-                        // backward compatibility
                         if (cmdLower == "exeaction") {
                             val parts = splitArgs(args)
                             if (parts.size >= 6) {
@@ -643,149 +636,142 @@ class ScriptEngine {
 
     // ---------------- ConcatExprEvaluator ----------------
     private object ConcatExprEvaluator {
-    // 格式化数字：如果是整数则不显示小数位，如果是浮点数则保留两位
-    private fun formatResult(value: Any?): String {
-        if (value is Double) {
-            return if (value % 1.0 == 0.0) {
-                value.toLong().toString()
-            } else {
-                "%.2f".format(java.util.Locale.US, value)
-            }
-        }
-        return value?.toString() ?: ""
-    }
-
-    @Throws(VariableMissingException::class)
-    fun evaluate(expr: String?, ctx: ExecutionContext): String {
-        if (expr == null || expr.isBlank()) return ""
-        
-        val trimmed = expr.trim()
-
-        // 核心逻辑：如果字符串不包含引号，且包含数学运算符，则尝试数学解析
-        val isMathProbable = !trimmed.contains("\"") && 
-            (trimmed.contains(Regex("[\\+\\-\\*/\\(\\)]")) || trimmed.toDoubleOrNull() != null)
-
-        if (isMathProbable) {
-            try {
-                val result = ArithmeticParser(trimmed, ctx).parse()
-                return formatResult(result)
-            } catch (e: Exception) {
-                // 如果解析失败（例如只是普通文本），降级到原有拼接逻辑
-            }
-        }
-
-        // --- 原有的字符串拼接逻辑 ---
-        val parts = ArrayList<String>()
-        var i = 0
-        while (i < expr.length) {
-            val c = expr[i]
-            if (c.isWhitespace() || c == '+') { i++; continue }
-            if (c == '"') {
-                val sb = java.lang.StringBuilder()
-                i++
-                while (i < expr.length) {
-                    val cc = expr[i]
-                    if (cc == '\\' && i + 1 < expr.length) {
-                        sb.append(expr[i+1]); i += 2
-                    } else if (cc == '"') {
-                        i++; break
-                    } else {
-                        sb.append(cc); i++
-                    }
+        private fun formatResult(value: Any?): String {
+            if (value is Double) {
+                return if (value % 1.0 == 0.0) {
+                    value.toLong().toString()
+                } else {
+                    "%.2f".format(java.util.Locale.US, value)
                 }
-                parts.add(sb.toString())
-            } else if (c == '$' || c.isLetter()) {
-                var j = i
-                while (j < expr.length && (expr[j].isLetterOrDigit() || expr[j] == '_' || expr[j] == '$')) j++
-                val id = expr.substring(i, j)
-                val key = if (id.startsWith("$")) id.substring(1) else id
-                val vv = ctx.resolveVar(key)
-                // 这里也应用一下格式化，防止变量里的 0.333333 直接喷出来
-                parts.add(formatResult(vv))
-                i = j
-            } else {
-                var j = i
-                while (j < expr.length && expr[j] != '+') j++
-                val lit = expr.substring(i, j).trim()
-                if (lit.isNotEmpty()) parts.add(lit)
-                i = j
+            }
+            return value?.toString() ?: ""
+        }
+
+        @Throws(VariableMissingException::class)
+        fun evaluate(expr: String?, ctx: ExecutionContext): String {
+            if (expr == null || expr.isBlank()) return ""
+            
+            val trimmed = expr.trim()
+            val isMathProbable = !trimmed.contains("\"") && 
+                (trimmed.contains(Regex("[\\+\\-\\*/\\(\\)]")) || trimmed.toDoubleOrNull() != null)
+
+            if (isMathProbable) {
+                try {
+                    val result = ArithmeticParser(trimmed, ctx).parse()
+                    return formatResult(result)
+                } catch (e: Exception) {
+                    // Fallback to string concatenation
+                }
+            }
+
+            val parts = ArrayList<String>()
+            var i = 0
+            while (i < expr.length) {
+                val c = expr[i]
+                if (c.isWhitespace() || c == '+') { i++; continue }
+                if (c == '"') {
+                    val sb = java.lang.StringBuilder()
+                    i++
+                    while (i < expr.length) {
+                        val cc = expr[i]
+                        if (cc == '\\' && i + 1 < expr.length) {
+                            sb.append(expr[i+1]); i += 2
+                        } else if (cc == '"') {
+                            i++; break
+                        } else {
+                            sb.append(cc); i++
+                        }
+                    }
+                    parts.add(sb.toString())
+                } else if (c == '$' || c.isLetter()) {
+                    var j = i
+                    while (j < expr.length && (expr[j].isLetterOrDigit() || expr[j] == '_' || expr[j] == '$')) j++
+                    val id = expr.substring(i, j)
+                    val key = if (id.startsWith("$")) id.substring(1) else id
+                    val vv = ctx.resolveVar(key)
+                    parts.add(formatResult(vv))
+                    i = j
+                } else {
+                    var j = i
+                    while (j < expr.length && expr[j] != '+') j++
+                    val lit = expr.substring(i, j).trim()
+                    if (lit.isNotEmpty()) parts.add(lit)
+                    i = j
+                }
+            }
+            return parts.joinToString("")
+        }
+    }
+
+    private class ArithmeticParser(private val expr: String, private val ctx: ExecutionContext) {
+        private var pos = -1
+        private var ch = 0
+
+        private fun nextChar() {
+            ch = if (++pos < expr.length) expr[pos].code else -1
+        }
+
+        private fun eat(charToEat: Int): Boolean {
+            while (ch == ' '.code) nextChar()
+            if (ch == charToEat) {
+                nextChar()
+                return true
+            }
+            return false
+        }
+
+        fun parse(): Double {
+            nextChar()
+            val x = parseExpression()
+            if (pos < expr.length) throw Exception("Unexpected: " + ch.toChar())
+            return x
+        }
+
+        private fun parseExpression(): Double {
+            var x = parseTerm()
+            while (true) {
+                if (eat('+'.code)) x += parseTerm()
+                else if (eat('-'.code)) x -= parseTerm()
+                else return x
             }
         }
-        return parts.joinToString("")
-    }
-}
 
-private class ArithmeticParser(private val expr: String, private val ctx: ExecutionContext) {
-    private var pos = -1
-    private var ch = 0
-
-    private fun nextChar() {
-        ch = if (++pos < expr.length) expr[pos].code else -1
-    }
-
-    private fun eat(charToEat: Int): Boolean {
-        while (ch == ' '.code) nextChar()
-        if (ch == charToEat) {
-            nextChar()
-            return true
+        private fun parseTerm(): Double {
+            var x = parseFactor()
+            while (true) {
+                if (eat('*'.code)) x *= parseFactor()
+                else if (eat('/'.code)) {
+                    val next = parseFactor()
+                    if (next == 0.0) throw ArithmeticException("Division by zero")
+                    x /= next
+                } else return x
+            }
         }
-        return false
-    }
 
-    fun parse(): Double {
-        nextChar()
-        val x = parseExpression()
-        if (pos < expr.length) throw Exception("Unexpected: " + ch.toChar())
-        return x
-    }
+        private fun parseFactor(): Double {
+            if (eat('+'.code)) return parseFactor()
+            if (eat('-'.code)) return -parseFactor()
 
-    // Expression = Term | Expression + Term | Expression - Term
-    private fun parseExpression(): Double {
-        var x = parseTerm()
-        while (true) {
-            if (eat('+'.code)) x += parseTerm()
-            else if (eat('-'.code)) x -= parseTerm()
-            else return x
-        }
-    }
-
-    // Term = Factor | Term * Factor | Term / Factor
-    private fun parseTerm(): Double {
-        var x = parseFactor()
-        while (true) {
-            if (eat('*'.code)) x *= parseFactor()
-            else if (eat('/'.code)) {
-                val next = parseFactor()
-                if (next == 0.0) throw ArithmeticException("Division by zero")
-                x /= next
-            } else return x
+            var x: Double
+            val startPos = pos
+            if (eat('('.code)) {
+                x = parseExpression()
+                eat(')'.code)
+            } else if ((ch >= '0'.code && ch <= '9'.code) || ch == '.'.code) {
+                while ((ch >= '0'.code && ch <= '9'.code) || ch == '.'.code) nextChar()
+                x = expr.substring(startPos, pos).toDouble()
+            } else if (ch == '$'.code || (ch.toChar().isLetter())) {
+                while (ch == '$'.code || ch.toChar().isLetterOrDigit() || ch == '_'.code) nextChar()
+                val name = expr.substring(startPos, pos).removePrefix("$")
+                val value = ctx.resolveVar(name)
+                x = value.toString().toDoubleOrNull() ?: 0.0
+            } else {
+                throw Exception("Unexpected: " + ch.toChar())
+            }
+            return x
         }
     }
 
-    // Factor = Number | Variable | ( Expression ) | +Factor | -Factor
-    private fun parseFactor(): Double {
-        if (eat('+'.code)) return parseFactor()
-        if (eat('-'.code)) return -parseFactor()
-
-        var x: Double
-        val startPos = pos
-        if (eat('('.code)) {
-            x = parseExpression()
-            eat(')'.code)
-        } else if ((ch >= '0'.code && ch <= '9'.code) || ch == '.'.code) {
-            while ((ch >= '0'.code && ch <= '9'.code) || ch == '.'.code) nextChar()
-            x = expr.substring(startPos, pos).toDouble()
-        } else if (ch == '$'.code || (ch.toChar().isLetter())) {
-            while (ch == '$'.code || ch.toChar().isLetterOrDigit() || ch == '_'.code) nextChar()
-            val name = expr.substring(startPos, pos).removePrefix("$")
-            val value = ctx.resolveVar(name)
-            x = value.toString().toDoubleOrNull() ?: 0.0
-        } else {
-            throw Exception("Unexpected: " + ch.toChar())
-        }
-        return x
-    }
-}
     // ---------------- 全局伴生对象 ----------------
     companion object {
         private val runningThreads = ConcurrentHashMap<String, Thread>()
@@ -794,6 +780,25 @@ private class ArithmeticParser(private val expr: String, private val ctx: Execut
         fun stopAllScripts() {
             runningContexts.values.forEach { it.stop() }
             runningThreads.values.forEach { if (it.isAlive) it.interrupt() }
+        }
+
+        /**
+         * 🔴 新增辅助方法：用于在解析前安全剔除行尾的 // 注释
+         * 注意防范字符串字面量里的 "//" （如 .setText("http://baidu.com")）
+         */
+        private fun removeComments(line: String): String {
+            var inQuotes = false
+            var i = 0
+            while (i < line.length) {
+                val c = line[i]
+                if (c == '"') {
+                    inQuotes = !inQuotes
+                } else if (c == '/' && !inQuotes && i + 1 < line.length && line[i + 1] == '/') {
+                    return line.substring(0, i) // 发现非字符串内的 //，直接截断
+                }
+                i++
+            }
+            return line
         }
 
         private fun splitArgs(rawArgs: String?): Array<String> {
@@ -829,18 +834,15 @@ private class ArithmeticParser(private val expr: String, private val ctx: Execut
         }
     }
     
-    // 在 ScriptEngine 类中添加
-private fun evalDouble(expr: String, ctx: ExecutionContext): Double {
-    return try {
-        // 先通过 evaluator 计算（支持了变量引用和四则运算）
-        val resultStr = ConcatExprEvaluator.evaluate(expr, ctx)
-        resultStr.toDoubleOrNull() ?: 0.0
-    } catch (e: Exception) {
-        0.0
+    private fun evalDouble(expr: String, ctx: ExecutionContext): Double {
+        return try {
+            val resultStr = ConcatExprEvaluator.evaluate(expr, ctx)
+            resultStr.toDoubleOrNull() ?: 0.0
+        } catch (e: Exception) {
+            0.0
+        }
     }
-}
 
-private fun evalLong(expr: String, ctx: ExecutionContext): Long = evalDouble(expr, ctx).toLong()
-private fun evalInt(expr: String, ctx: ExecutionContext): Int = evalDouble(expr, ctx).toInt()
+    private fun evalLong(expr: String, ctx: ExecutionContext): Long = evalDouble(expr, ctx).toLong()
+    private fun evalInt(expr: String, ctx: ExecutionContext): Int = evalDouble(expr, ctx).toInt()
 }
-

@@ -88,7 +88,10 @@ object DataManager {
             var indexInCurrentBlock = 0
 
             while (true) {
-                val line = br.readLine().removePrefix("\uFEFF") ?: break
+                // 1. 先获取行，并安全判空
+                val rawLine = br.readLine() ?: break
+                // 2. 移除 BOM 头后再进行 trim
+                val line = rawLine.removePrefix("\uFEFF")
                 val trimmed = line.trim()
                 if (trimmed.isEmpty()) continue
 
@@ -99,8 +102,9 @@ object DataManager {
                     if (remainder.startsWith("T,")) {
                         try {
                             val tValue = remainder.substring(2).trim().toInt()
-                            currentBlock = Block(Block.TYPE_TASK, tValue, 0, 0, nextGlobalIndex)
-                            blocks.add(currentBlock!!)
+                            val newBlock = Block(Block.TYPE_TASK, tValue, 0, 0, nextGlobalIndex)
+                            currentBlock = newBlock
+                            blocks.add(newBlock) // 避免使用 !!
                             indexInCurrentBlock = 0
                             continue
                         } catch (e: Exception) {
@@ -115,8 +119,9 @@ object DataManager {
                             val a = parts[0].trim().toInt()
                             val b = parts[1].trim().toInt()
                             val c = parts[2].trim().toInt()
-                            currentBlock = Block(Block.TYPE_CONFIG, a, b, c, nextGlobalIndex)
-                            blocks.add(currentBlock!!)
+                            val newBlock = Block(Block.TYPE_CONFIG, a, b, c, nextGlobalIndex)
+                            currentBlock = newBlock
+                            blocks.add(newBlock) // 避免使用 !!
                             indexInCurrentBlock = 0
                             continue
                         } catch (_: NumberFormatException) {

@@ -64,6 +64,10 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.Image // 👈 显式导入这个组件
+import android.content.ComponentName
+import android.content.ServiceConnection
+import android.os.IBinder
+import android.provider.Settings // 用于 ACTION_MANAGE_OVERLAY_PERMISSION 和 canDrawOverlays
 
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -111,7 +115,6 @@ class MainActivity : ComponentActivity() {
         val pngDir = File(getExternalFilesDir(null), "blockpng")  
 
         copyAssetsFolder(this, "note", noteDir)  
-        if (!scriptDir.exists()) copyAssetsFolder(this, "script", scriptDir)  
         if (!pngDir.exists()) copyAssetsFolder(this, "blockpng", pngDir)  
 
         setContent {  
@@ -131,7 +134,6 @@ class MainActivity : ComponentActivity() {
             }
 
             MaterialTheme(
-                typography = MinecraftTypography
             ) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
@@ -145,19 +147,20 @@ class MainActivity : ComponentActivity() {
                     ) {  
                         composable("featureSelection") {  
                             val defaultFeatures = listOf(  
-                                FeatureItem("1", "【自动操作】", Icons.Default.Person, McColors.TextGreen, "scriptCommand"),  
-                                FeatureItem("2", "【音符盒方块】", Icons.Default.Analytics, Color(0xFFFFCC00), "musicCommand"),  
-                                FeatureItem("3", "【地图画转换】", Icons.Default.Analytics, Color(0xFF00AAAA), "ImageTo"),  
-                                FeatureItem("4", "【结构生成器】", Icons.Default.Star, Color(0xFFAA00AA), "StructureGenerator"),  
-                                FeatureItem("5", "【结构转命令】", Icons.Default.Star, Color(0xFFAA00AA), "McStructure3DCommand"),
-                                FeatureItem("6", "【红石设置】", Icons.Default.Build, McColors.TextRed, "settings"),
+                                FeatureItem("1", "【自动操作】", Icons.Default.Person, Color(0xFF0000), "scriptCommand"),  
+                                FeatureItem("2", "【音符盒方块】", Icons.Default.Analytics, Color(0xFF8C00), "musicCommand"),  
+                                FeatureItem("3", "【地图画转换】", Icons.Default.Analytics, Color(0xFFD700), "ImageTo"),  
+                                FeatureItem("4", "【结构生成器】", Icons.Default.Star, Color(0x00CC00), "StructureGenerator"),  
+                                FeatureItem("5", "【结构转命令】", Icons.Default.Star, Color(0x00CED1), "McStructure3DCommand"),
+                                FeatureItem("6", "【结构格式转换】", Icons.Default.Star, Color(0x1E90FF), "StructureConverterScreen"),
+                                FeatureItem("7", "【红石设置】", Icons.Default.Build, Color(0x9370DB), "settings"),
                             )  
 
                             FeatureSelectionScreen(  
                                 defaultFeatures = defaultFeatures,  
                                 onNavigate = { route ->  
                                     when (route) {  
-                                        "scriptCommand", "musicCommand", "settings", "ImageTo", "StructureGenerator", "McStructure3DCommand" -> {  
+                                        "scriptCommand", "musicCommand", "settings", "ImageTo", "StructureGenerator", "McStructure3DCommand", "StructureConverterScreen" -> {  
                                             navController.navigate(route) {  
                                                 launchSingleTop = true  
                                                 restoreState = true  
@@ -174,6 +177,7 @@ class MainActivity : ComponentActivity() {
                         composable("settings") { SettingsScreen(onBack = { if (navController.currentBackStackEntry?.destination?.route != "featureSelection") navController.popBackStack() }) }
                         composable("StructureGenerator") { StructureGeneratorScreen(onBack = { if (navController.currentBackStackEntry?.destination?.route != "featureSelection") navController.popBackStack() }) }
                         composable("McStructure3DCommand") { McStructure3DCommandScreen(onBack = { if (navController.currentBackStackEntry?.destination?.route != "featureSelection") navController.popBackStack() }) }
+                        composable("StructureConverterScreen") { StructureConverterScreen(onBack = { if (navController.currentBackStackEntry?.destination?.route != "featureSelection") navController.popBackStack() }) }
                     }  
                 }
             }
@@ -238,10 +242,92 @@ class MainActivity : ComponentActivity() {
             Log.e(TAG, "Failed to copy asset file: $assetPath -> ${outFile.absolutePath}", e)
         }
     }
+    
+    private var pickerService: CoordinatePickerService? = null
+    private var isBound = false
+
+// 临时存储当前选点的回调
+private var currentCallback: ((Float, Float) -> Unit)? = null
+
+private val connection: ServiceConnection = object : ServiceConnection {
+    override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+        val binder = service as CoordinatePickerService.LocalBinder
+        pickerService = binder.getService().apply {
+            
+            // 【新增核心】：监听服务内部发起的自杀/卸载请求（如点击了√或拖到了底部销毁区）
+            onServiceDestroyRequest = {
+    runOnUiThread {
+        releasePickerService()
+    }
 }
-private val MinecraftFont = FontFamily(
-    Font(R.font.minecraft)
-)
+
+            // 你的选点回调逻辑（保持不变）
+            onCoordinateSelected = { rawX, rawY ->
+                runOnUiThread {
+                    try {
+                        if (isFinishing || isDestroyed) {
+                            Log.w("DEBUG", "Activity 已销毁，拦截此次悬浮窗回调")
+                            return@runOnUiThread
+                        }
+                        currentCallback?.invoke(rawX, rawY)
+                    } catch (e: Exception) {
+                        Log.e("DEBUG", "回调内部执行发生异常，已被安全拦截", e)
+                    }
+                }
+            }
+        }
+        isBound = true
+    }
+
+    override fun onServiceDisconnected(name: ComponentName?) {
+    isBound = false
+    pickerService = null
+}
+}
+/**
+ * 启动坐标选择器
+ * @param tag 标识当前是 A 点还是 B 点（仅用于日志或特殊统计）
+ * @param onResult 坐标选定后的赋值回调
+ */
+fun startLocationPicker(tag: String, onResult: (Float, Float) -> Unit) {
+    if (!Settings.canDrawOverlays(this)) {
+        startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION))
+        return
+    }
+
+    releasePickerService()
+    currentCallback = onResult
+
+    val intent = Intent(this, CoordinatePickerService::class.java)
+    startService(intent)
+    bindService(intent, connection, Context.BIND_AUTO_CREATE)
+
+    moveTaskToBack(true)
+}
+
+private fun releasePickerService() {
+    if (isBound) {
+        try {
+            unbindService(connection)
+        } catch (_: Exception) {}
+        isBound = false
+    }
+
+    pickerService = null
+
+    try {
+        stopService(Intent(this, CoordinatePickerService::class.java))
+    } catch (_: Exception) {}
+}
+
+override fun onDestroy() {
+    super.onDestroy()
+    if (isBound) {
+        unbindService(connection)
+        isBound = false
+    }
+}
+}
 
 
 // ---------- MC像素风格文本组件 ----------
@@ -710,7 +796,7 @@ fun McImageBanner(
                     text = "${pagerState.currentPage + 1}/${bannerItems.size}",
                     color = Color.White,
                     fontSize = 12.sp,
-                    fontFamily = MinecraftFont 
+                   
                 )
             }
         }

@@ -129,6 +129,7 @@ fun ImageConversionScreen(onBack: () -> Unit) {
     var Ename by rememberPreference("Ename", "A", prefs)
     var StartOffset by rememberPreference("StartOffset", "0", prefs)
     var ForbiddenScores by rememberPreference("ForbiddenScores", "6489,8964", prefs)
+    var enableExtraSensitiveOptimization by rememberPreference("enableExtraSensitiveOptimization", true, prefs)
     var c1 by rememberPreference("c1", false, prefs)
     var c2 by rememberPreference("c2", false, prefs)
     var cc1 by remember { mutableStateOf(false) } // 这个是生成结果的状态，不需要持久化
@@ -425,6 +426,7 @@ val resetAll = {
     intsString = "0,0,0,0"
     StartOffset = "0"
     ForbiddenScores = "6489,8964"
+    enableExtraSensitiveOptimization = true
     
     // 4. 清空列表和 Map
     customImages.clear()
@@ -544,6 +546,7 @@ val valueMap2 = mapOf(
                                 .setForbiddenScores(parseIntList(ForbiddenScores) ?: emptySet<Int>())
                                 .setMultiplier(multiplier.toIntOrNull() ?: 1)
                                 .setisAddTxt(isAddTxt)
+                                .setEnableExtraSensitiveOptimization(enableExtraSensitiveOptimization)
                                 .setMapMappingText(mapMappingText)
                                 .setCallback(object : PixelArtGenerator.Callback {
                                     override fun onProgress(message: String) {
@@ -687,7 +690,8 @@ MapModeConfigCard(
     }
     s2 = newValue
 },
-    sel2Input = s2Val, onSel2InputChange = { s2Val = it }
+    sel2Input = s2Val, onSel2InputChange = { s2Val = it },
+    enableExtraSensitiveOptimization = enableExtraSensitiveOptimization, onEnableExtraSensitiveOptimizationChange = { enableExtraSensitiveOptimization = it },
 )
 
         Button(
@@ -1009,7 +1013,8 @@ fun ConfigDashboardCard(
     sel1: String, onSel1Change: (String) -> Unit,
     sel1Input: String, onSel1InputChange: (String) -> Unit,
     sel2: String, onSel2Change: (String) -> Unit,
-    sel2Input: String, onSel2InputChange: (String) -> Unit
+    sel2Input: String, onSel2InputChange: (String) -> Unit,
+    enableExtraSensitiveOptimization: Boolean, onEnableExtraSensitiveOptimizationChange: (Boolean) -> Unit,
 ) {
     // 逻辑计算：自动算出被排除的那个
     val excludedParam = logicOptions.find { it != sel1 && it != sel2 } ?: "无"
@@ -1051,6 +1056,15 @@ for (i in intLabels.indices) {
                 CompactTextField(Modifier.weight(1f), "记分板相对起点 (默认0)", StartOffset, onStartOffsetChange)
                 CompactTextField(Modifier.weight(1f), "违禁数值 (用逗号分隔)", ForbiddenScores, onForbiddenScoresChange)
             }
+            
+            Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("是否启用网易违禁词规避", style = MaterialTheme.typography.titleMedium)
+                        Switch(checked = enableExtraSensitiveOptimization, onCheckedChange = onEnableExtraSensitiveOptimizationChange)
+                    }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), thickness = 0.5.dp)
 

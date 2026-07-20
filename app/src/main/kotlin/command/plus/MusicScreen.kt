@@ -124,7 +124,8 @@ fun MusicScreen(onBack: () -> Unit) {
     var outType by remember { mutableStateOf(sp.getInt("outType", 0)) }
     var mode by remember { mutableStateOf(sp.getInt("mode", 0)) }
     var extPath by remember { mutableStateOf(sp.getString("extPath", "output") ?: "output") }
-    var stackEnabled by remember { mutableStateOf(sp.getBoolean("stack", true)) }
+    var stackEnabled by remember { mutableStateOf(sp.getBoolean("stack", false)) }
+    var enableExtraSensitiveOptimization by remember { mutableStateOf(sp.getBoolean("enableExtraSensitiveOptimization", true)) }
     var params by remember {
         mutableStateOf(List(9) { i -> sp.getString("p${i + 1}", getDefaultParam(i)) ?: getDefaultParam(i) })
     }
@@ -183,7 +184,7 @@ fun MusicScreen(onBack: () -> Unit) {
         }
     )
 
-    LaunchedEffect(fileList, manualPaths, outType, mode, extPath, stackEnabled, params, instrumentList) {
+    LaunchedEffect(fileList, manualPaths, outType, mode, extPath, stackEnabled, params, instrumentList, enableExtraSensitiveOptimization) {
         delay(300) 
         sp.edit().apply {
             putString("manualPaths", manualPaths)
@@ -192,6 +193,7 @@ fun MusicScreen(onBack: () -> Unit) {
             putString("extPath", extPath)
             putBoolean("stack", stackEnabled)
             params.forEachIndexed { i, value -> putString("p${i + 1}", value) }
+            putBoolean("enableExtraSensitiveOptimization", enableExtraSensitiveOptimization)
             apply()
         }
         saveInstrumentMap(sp, instrumentList)
@@ -271,6 +273,7 @@ fun MusicScreen(onBack: () -> Unit) {
             putInt("mode", mode)
             putString("extPath", extPath)
             putBoolean("stack", stackEnabled)
+            putBoolean("enableExtraSensitiveOptimization", enableExtraSensitiveOptimization)
             params.forEachIndexed { i, value -> putString("p${i + 1}", value) }
             apply()
         }
@@ -845,6 +848,15 @@ if (result.first != null && result.second != null) {
                         Text("是否保留同刻重复音", style = MaterialTheme.typography.titleMedium)
                         Switch(checked = stackEnabled, onCheckedChange = { stackEnabled = it })
                     }
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("是否启用网易违禁词规避", style = MaterialTheme.typography.titleMedium)
+                        Switch(checked = enableExtraSensitiveOptimization, onCheckedChange = { enableExtraSensitiveOptimization = it })
+                    }
                 }
             }
 
@@ -1004,7 +1016,8 @@ if (result.first != null && result.second != null) {
                             manualPaths = ""
                             params = List(9) { i -> getDefaultParam(i) }
                             instrumentList = defaultInstrumentMap().map { InstrumentItem(def = it) }
-                            stackEnabled = true
+                            stackEnabled = false
+                            enableExtraSensitiveOptimization = true
                             outType = 0
                             mode = 0
                             extPath = "output"

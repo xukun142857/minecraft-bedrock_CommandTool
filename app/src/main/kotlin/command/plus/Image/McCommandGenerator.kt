@@ -3,6 +3,7 @@ package command.plus
 import java.io.File
 import java.io.FileOutputStream
 import java.util.TreeSet
+import java.util.regex.Pattern
 
 /**
  * 我的世界 Minecraft 盔甲架命令生成器 (多实体增强版) - 已修复首行置位TP偏移Bug
@@ -24,6 +25,7 @@ class McCommandGenerator private constructor(
     private val startScoreOffset: Int,
     private val forbiddenScores: Set<Int>,
     private val generationMultiplier: Int, // 生成倍数
+    private val enableExtraSensitiveOptimization: Boolean, // 【新增】是否开启附加违禁数值优化
     private val saveFile: File?,
     private val callback: (List<String>) -> Unit
 ) {
@@ -34,6 +36,67 @@ class McCommandGenerator private constructor(
         var selectorPart: String,
         val corrections: MutableList<Int> = mutableListOf()
     )
+
+    // 【新增】网易敏感数值检测器 Kotlin 移植版
+    class NeteaseSensitiveDetector {
+        private val patterns: List<Regex>
+
+        init {
+        // 提取原有的边界定义，以便在正则中复用
+        val boundaryLeft64 = """[（）+\-#0-9一-龥{}/a-z,\s。°￥¥%:.\…，~]"""
+        val boundaryRight64 = """[（）（）{}+\-#0-9_a-z一-龥=.\，,\—\…'%１２３４５６７８９０]|\s[0-9]"""
+
+        patterns = listOf(
+            // 1. 基础数字隔离干扰匹配 (6489 / 8964 变体)
+            Regex("""^[\s\.,，]*?[6][\s\.,，]*?[4][\s\.,，]*?[8][\s\.,，]*?[9][\s\.,，]*?$""", RegexOption.IGNORE_CASE),
+            Regex("""^[\s.,，]?[6][\s.,，]?[4][\s.,，]?[8][\s.,，]?[9][\s.,，]?$""", RegexOption.IGNORE_CASE),
+            Regex("""^[\s.,，]?[8][\s.,，]?[9][\s.,，]?[6][\s.,，]?[4][\s.,，]?$""", RegexOption.IGNORE_CASE),
+            
+            // 2. 带前后缀过滤的 64 变体 (包含多国字符/全角数字变形)
+            Regex("""^(?!.?@).?(?<!$boundaryLeft64)([6б６⒍⑥ｂБЬ㈥⑹][^一-龥1-9１２３４５６７８９０a-z=/]?[4４⒋④㈣⑷Ч４ㄐчㄐ])(?!($boundaryRight64))""", RegexOption.IGNORE_CASE),
+            
+            // 3. 带后缀过滤的 89 变体 (过滤了“法师”、“求组”、JPE文件等)
+            Regex("""(?<![\[\<\>\(\)\（\）\+\-#0-9一-龥\\\{\}\/a-z\,\s_。°￥¥%\:\.\…\'\"\，\^\~\]])[捌八8][^一-龥、\-#0-9a-z=]*?[九玖9](?!(\-JPE|\\|[\.\-][0-9]))(?!([\[\<\>\(\)\（\）\{\}\+\-#0-9_a-z一-龥\=\*\.\，\,\—\…\'\"\'%１２３４５６７８９０\]]|\s[0-9]|\s法师|\s求组))""", RegexOption.IGNORE_CASE),
+            
+            // 4. 常见敏感数字组合变形 (89, 64, 535) 及后缀防误报
+            Regex("""(?<![\<\>\(\%\~#0-9a-z座米零一二三五七世开期周])([8八捌][9九玖]|[6六陆][4四肆]|[5五][3三][5五])(?![_a-z0-9个道分级进月班舍寝室八节点,\)])""", RegexOption.IGNORE_CASE),
+            
+            // 5. 64 变形与复杂干扰符匹配
+            Regex("""^(?!.*?@).*?(?<![\[\<\>\(\)\（\）\+\-#0-9一-龥\\\{\}\/a-z\,\s_。°￥¥%\:\.\…\，\~\]])([6б６⒍⑥ｂБЬ㈥⑹六陆][^一-龥1-9１２３４５６７８９０a-z=\/]*?[4４⒋④㈣⑷四肆Ч４ㄐчㄐ])(?!([\[\<\>\(\)\（\）\{\}\+\-#0-9_a-z一-龥\=\*\.\，\,\—\…\'%１２３４５６７８９０\]]|\s[0-9]))""", RegexOption.IGNORE_CASE),
+            
+            // 6. 罗马数字、大写数字与长多位数混淆组合 (如 896404, 469891 等)
+            Regex("""(?<![\[\<\>\(\)\（\）\+\-#0-9一-龥\\\{\}\/a-z\,\s_。°￥¥%\:\.\…\，\~\]])([捌八8Ⅷ][^一-龥0-9a-z=ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ]*?[九玖9Ⅸ][^一-龥0-9a-z=ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ]*?[6б６⒍⑥ｂБЬ㈥⑹六陆Ⅵ][^一-龥0-9a-z=ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ]*?[0零]?[^一-龥0-9a-z=ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ]*?[4４⒋④㈣⑷四肆Ч４ㄐчㄐⅣ]|1?9?[捌八8][九玖9].?[6六陆溜][0零]?[4四肆]|1?9?[6六陆][0零]?[4四肆][^一-龥0-9a-z]?[捌八8][九玖9]|469891)(?!([\[\<\>\(\)\（\）\+\-#0-9_a-z一-龥\*\.\，\,\—\…\'%１２３４５６７８９０\]]|\s[0-9]))""", RegexOption.IGNORE_CASE),
+            
+            // 7. 8964 各类标点、空格大跨度隔离匹配 (已移除原 content= 依赖)
+            Regex("""^[\s\.\,\，。丶]*?[8八捌叭][\s\.\,\，。丶]*?[9九玖][\s\.\,\，。丶]*?[6六陆][\s\.\,\，。丶]*?[4四肆][\s\.\,\，。丶_]*?$""", RegexOption.IGNORE_CASE),
+            Regex("""^[\s\.\,\，。丶]*?[8八捌叭][\s\.\,\，。丶]*?[9九玖][\s\.\,\，。丶]*?[6六陆][\s\.\,\，。丶]*?[4四肆][\s\.\,\，。丶]*?[8八捌叭][\s\.\,\，。丶]*?[9九玖][\s\.\,\，。丶]*?$""", RegexOption.IGNORE_CASE),
+            Regex("""^[\s\.\,\，。丶]*?[6六陆][\s\.\,\，。丶]*?[4四肆][\s\.\,\，。丶]*?[8八捌叭][\s\.\,\，。丶]*?[9九玖][\s\.\,\，。丶]*?[6六陆][\s\.\,\，。丶]*?[4四肆][\s\.\,\，。丶]*?$""", RegexOption.IGNORE_CASE),
+            
+            // 8. 拼音及数字混合组合型 (如 liu si ba jiu / 6489)
+            Regex("""(?<![\(a-z0-9#\)])((liu|[6六])\s*?(si|[4四])\s*?(ba|[8八])\s*?(jiu|[9九])|[六6陆][十0拾]?[四4肆][八8捌][十0拾]?[九9玖])(?![\(_0-9a-z\)])""", RegexOption.IGNORE_CASE),
+            
+            // 9. 拼音缩写及带点字符混淆组合型 (ba jiu liu si)
+            Regex("""^(?!.*?@[as]).*?(?<![\[\<\>\(\)\（\）\+\-#0-9a-z\\\{\}\/\,\s_。°￥¥%\:\.\…\，\]])[8八][^一-龥a-z0-9]*?[9九][^一-龥a-z0-9]*?[6六][^一-龥a-z0-9]*?[4四](?![\[\<\>\(\)\（\）\+\-#0-9a-z\\\{\}\/\,\s。°￥¥%\:\.\…\，\]])""", RegexOption.IGNORE_CASE),
+            Regex("""(?<![a-z0-9#])(ba|[8八])\s*?(jiu|[9九])\s*?(liu|[6六])\s*?(si|[4四])(?![0-9a-z])""", RegexOption.IGNORE_CASE),
+            Regex("""(?<![a-z0-9#])[8八][s\.\,\，丶]*?[9九][s\.\,\，丶]*?l[s\.\,\，丶]*?si?(?![0-9a-z])""", RegexOption.IGNORE_CASE),
+            
+            // 10. 拆字/算式型变形 (如 6+3 3+3 2+2)
+            Regex("""6\+3[^a-z一-龥0-9]*?3\+3[^a-z一-龥0-9]*?2\+2(?![0-9a-z])""", RegexOption.IGNORE_CASE),
+            
+            // 11. 历史跨度多位敏感数字 (原 375415 规则与新增 37... 规则合流)
+            Regex("""[3].{0,3}?[7].{0,3}?[5].{0,3}?[4].{0,3}?[1一].{0,3}?[5]""", RegexOption.IGNORE_CASE),
+            Regex("""(?<![0-9#])37[a-z\s\.\,\，。丶]*?年[0-9a-z\s\.\,\，。丶]*?前""", RegexOption.IGNORE_CASE),
+            Regex("""(?<![0-9#])[4四]?[\s\.\,\，。丶]*?[2二][\s\.\,\，。丶]*?[6六][\s\.\,\，。丶]*?社论""", RegexOption.IGNORE_CASE),
+            Regex("""^[^\sa-zA-Z一-龥0-9]*?(?<![#])[3３三叁]([^一-龥0-9１２３４五六七八九零a-z=\/]*?|十)[7七柒][^a-zA-Z一-龥0-9]*?$""", RegexOption.IGNORE_CASE)
+        )
+    }
+
+        fun matchText(text: String): Boolean {
+            return patterns.any { it.containsMatchIn(text) }
+        }
+    }
+
+    private val detector = if (enableExtraSensitiveOptimization) NeteaseSensitiveDetector() else null
 
     fun generate() {
         try {
@@ -118,23 +181,68 @@ class McCommandGenerator private constructor(
     }
 
     private fun getSafeRange(start: Int, end: Int, allTimesInChain: Set<Int>): RangeResult {
-        var finalStart = start
-        var finalEnd = end
-        val res = RangeResult(selectorPart = "")
+    var finalStart = start
+    var finalEnd = end
+    val res = RangeResult(selectorPart = "")
 
-        if (forbiddenScores.contains(start) && !isConsecutiveForbidden(start)) {
-            finalStart = start - 1
-            if (!allTimesInChain.contains(finalStart)) res.corrections.add(finalStart)
-        }
-
-        if (forbiddenScores.contains(end) && !isConsecutiveForbidden(end)) {
-            finalEnd = end + 1
-            if (!allTimesInChain.contains(finalEnd)) res.corrections.add(finalEnd)
-        }
-
-        res.selectorPart = if (finalStart == finalEnd) "$scoreboardObj=!$finalStart" else "$scoreboardObj=!$finalStart..$finalEnd"
-        return res
+    // 1. 基础违禁数值检查（保留原有的基础黑名单过滤）
+    if (forbiddenScores.contains(start) && !isConsecutiveForbidden(start)) {
+        finalStart = start - 1
+        if (!allTimesInChain.contains(finalStart)) res.corrections.add(finalStart)
     }
+
+    if (forbiddenScores.contains(end) && !isConsecutiveForbidden(end)) {
+        finalEnd = end + 1
+        if (!allTimesInChain.contains(finalEnd)) res.corrections.add(finalEnd)
+    }
+
+    // 2. 贴合真实语境的网易敏感词检测与规避
+    if (detector != null) {
+        if (start == end) {
+            // 【单个数场景】：严格模拟实际生成的 "n=!s," 形式进行审查
+            val testStr = "$scoreboardObj=!$start,"
+            if (detector.matchText(testStr)) {
+                // 触发敏感时，整体向前偏移 1 位，确保 finalStart 依然等于 finalEnd（保持单数语义）
+                finalStart = start - 1
+                finalEnd = end - 1
+                if (!allTimesInChain.contains(finalStart)) {
+                    res.corrections.add(finalStart)
+                }
+            }
+        } else {
+            // 【两个数区间场景】：严格模拟实际生成的 "n=!s..e," 形式进行审查
+            val testStr = "$scoreboardObj=!$start..$end,"
+            if (detector.matchText(testStr)) {
+                // 如果整个选择器区间串触发了敏感（如 n=!64..89,），则对前方数值进行偏移规避
+                finalStart = start - 1
+                if (!allTimesInChain.contains(finalStart)) {
+                    res.corrections.add(finalStart)
+                }
+            } else {
+                // 如果整体安全，再分别确认在独立拆分或单端放入选择器时的边界安全性
+                val startSensitive = detector.matchText("$scoreboardObj=!$start,")
+                val endSensitive = detector.matchText("$scoreboardObj=!$end,")
+                
+                if (startSensitive) {
+                    finalStart = start - 1
+                    if (!allTimesInChain.contains(finalStart)) res.corrections.add(finalStart)
+                }
+                if (endSensitive) {
+                    finalEnd = end + 1
+                    if (!allTimesInChain.contains(finalEnd)) res.corrections.add(finalEnd)
+                }
+            }
+        }
+    }
+
+    // 3. 组装最终的选择器文本
+    res.selectorPart = if (finalStart == finalEnd) {
+        "$scoreboardObj=!$finalStart"
+    } else {
+        "$scoreboardObj=!$finalStart..$finalEnd"
+    }
+    return res
+}
 
     private fun isConsecutiveForbidden(valNum: Int): Boolean = forbiddenScores.contains(valNum - 1) || forbiddenScores.contains(valNum + 1)
 
@@ -199,34 +307,34 @@ class McCommandGenerator private constructor(
     }
 
     private fun flushSetblockCommand(
-    out: MutableList<String>,
-    selectors: List<String>,
-    corrections: Set<Int>,
-    blockId: String
-) {
-    if (selectors.isEmpty()) return
+        out: MutableList<String>,
+        selectors: List<String>,
+        corrections: Set<Int>,
+        blockId: String
+    ) {
+        if (selectors.isEmpty()) return
 
-    val sb = StringBuilder()
+        val sb = StringBuilder()
 
-    sb.append("/execute as @e[scores={$scoreboardObj=$startScoreOffset..}] at @s unless entity @s[scores={")
-        .append(selectors.joinToString(","))
-        .append("}]")
+        sb.append("/execute as @e[scores={$scoreboardObj=$startScoreOffset..}] at @s unless entity @s[scores={")
+            .append(selectors.joinToString(","))
+            .append("}]")
 
-    if (corrections.isNotEmpty()) {
-        sb.append(" if entity @s[scores={")
+        if (corrections.isNotEmpty()) {
+            sb.append(" if entity @s[scores={")
 
-        sb.append(
-            corrections.joinToString(",") {
-                "$scoreboardObj=!$it"
-            }
-        )
+            sb.append(
+                corrections.joinToString(",") {
+                    "$scoreboardObj=!$it"
+                }
+            )
 
-        sb.append("}]")
+            sb.append("}]")
+        }
+
+        sb.append(" run setblock ~ ~ ~ ").append(blockId)
+        out.add(sb.toString())
     }
-
-    sb.append(" run setblock ~ ~ ~ ").append(blockId)
-    out.add(sb.toString())
-}
 
     private fun generateCommands(matrix: List<List<String>>): List<String> {
         val cmds = mutableListOf<String>()
@@ -275,7 +383,6 @@ class McCommandGenerator private constructor(
 
         var currentGlobalPos = 1 
         val killScores = mutableListOf<Int>()
-        // 【新增】用于记录所有实体初始分数的集合
         val initialScoresList = mutableListOf<Int>()
 
         for (n in 0 until actualCount) {
@@ -299,7 +406,6 @@ class McCommandGenerator private constructor(
             finalCoords[outerAxis] = finalCoords[outerAxis]!! + offsetOuter
 
             val initialScore = startScoreOffset + finalScore
-            // 【新增】保存当前实体的初始分数
             initialScoresList.add(initialScore)
 
             cmds.add("/summon armor_stand ${finalCoords[Axis.长]} ${finalCoords[Axis.深]} ${finalCoords[Axis.宽]} ~ ~ . $currentName")
@@ -320,7 +426,6 @@ class McCommandGenerator private constructor(
         cmds.add("$2,0,0")
         
         val rowEndIndices = (1..totalRows - 1).map { it * rowLength }
-        // 【修改】通过 .filter 断开冲突：如果换行分数正好是某个实体的初始诞生分数，直接将其剔除！
         val jumpScores = rowEndIndices.map { startScoreOffset + it + 1 }
             .filter { it !in initialScoresList }
         
@@ -387,6 +492,7 @@ class McCommandGenerator private constructor(
         private var startScoreOffset: Int = 0
         private var forbiddenScores: Set<Int> = emptySet()
         private var generationMultiplier: Int = 1 
+        private var enableExtraSensitiveOptimization: Boolean = true // 【新增】默认为 false
         private var callback: ((List<String>) -> Unit)? = null
 
         fun setInputData(data: String) = apply { this.inputData = data }
@@ -412,6 +518,7 @@ class McCommandGenerator private constructor(
         fun setStartScoreOffset(offset: Int) = apply { this.startScoreOffset = offset }
         fun setForbiddenScores(values: Set<Int>) = apply { this.forbiddenScores = values }
         fun setGenerationMultiplier(m: Int) = apply { this.generationMultiplier = if (m < 1) 1 else m }
+        fun setEnableExtraSensitiveOptimization(enable: Boolean) = apply { this.enableExtraSensitiveOptimization = enable } // 【新增】设置方法
         fun setCallback(callback: (List<String>) -> Unit) = apply { this.callback = callback }
         fun setOutputFile(path: String) = apply { this.saveFile = File(path) }
         fun setOutputFile(file: File) = apply { this.saveFile = file }
@@ -421,7 +528,7 @@ class McCommandGenerator private constructor(
             return McCommandGenerator(
                 inputData, scoreboardObj, entityName, charLimit, startLength, startDepth, startWidth,
                 mirrorHorizontal, mirrorVertical, innerAxis, innerStep, outerAxis, outerStep,
-                startScoreOffset, forbiddenScores, generationMultiplier, saveFile, callback!!
+                startScoreOffset, forbiddenScores, generationMultiplier, enableExtraSensitiveOptimization, saveFile, callback!!
             )
         }
     }

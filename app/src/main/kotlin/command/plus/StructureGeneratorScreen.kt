@@ -1,14 +1,13 @@
 package command.plus
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.widget.Toast
-import androidx.activity.compose.ManagedActivityResultLauncher
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -31,8 +30,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.ScrollState
 import android.util.Log
+
+import android.content.ClipData
+import android.content.ClipboardManager
 // --- 辅助工具函数 ---
 
 /**
@@ -41,7 +42,7 @@ import android.util.Log
 suspend fun readTextFromUriOrPath(context: Context, input: String): String = withContext(Dispatchers.IO) {
     if (input.startsWith("content://")) {
         context.contentResolver.openInputStream(Uri.parse(input))?.use { it.bufferedReader().readText() }
-            ?: throw Exception("无法打开 URI 内容")
+            ?: throw Exception("无法打开 URI 读取内容")
     } else {
         val file = File(input)
         if (!file.exists()) throw Exception("文件不存在: $input")
@@ -78,21 +79,15 @@ fun StructureGeneratorScreen(onBack: () -> Unit) {
 
     // 持久化存储
     val prefs = remember { context.getSharedPreferences("StructureGeneratorPrefs", Context.MODE_PRIVATE) }
-    val featurePrefs = remember { context.getSharedPreferences("feature_prefs", Context.MODE_PRIVATE) }
 
     // 配置项映射
-    val isAbsolute_path by rememberPreference("isAbsolute_path", true, featurePrefs)
-    var cmdFileName by rememberPreference("cmd_file_name", "未选择命令文件", featurePrefs)
-    var gridFileName by rememberPreference("grid_file_name", "未选择阵列文件", featurePrefs)
-    var cmdUri by rememberPreference("cmd_uri", "", featurePrefs)
-    var gridUri by rememberPreference("grid_uri", "", featurePrefs)
-
     var configMode by rememberPreference("config_mode", "COMMAND", prefs)
     var outputPath by rememberPreference("output_path", "/sdcard/Download", prefs)
     var outputType by rememberPreference("output_type", "内部存储 (应用私有)", prefs)
 
     var cmdFilePath by rememberPreference("cmd_file_path", "", prefs)
     var gridFilePath by rememberPreference("grid_file_path", "", prefs)
+    var splitFilePath by rememberPreference("split_file_path", "", prefs)
     
     // 蛇形往复重构开关，默认开启
     var isSerpentine by rememberPreference("is_serpentine", true, prefs)
@@ -106,35 +101,52 @@ fun StructureGeneratorScreen(onBack: () -> Unit) {
 
     var showResetDialog by remember { mutableStateOf(false) }
 
-    // 文件选择器
-    val systemFilePickerLauncher = rememberLauncherForActivityResult(
+    // --- 各模式专属的文件读取 Launcher ---
+    val cmdPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        uri?.let {
-            try {
-                context.contentResolver.takePersistableUriPermission(it, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            } catch (e: Exception) { e.printStackTrace() }
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        try {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+        } catch (_: SecurityException) {}
+        cmdFilePath = uri.toString()
+    }
 
-            val displayName = context.contentResolver.query(it, null, null, null, null)?.use { cursor ->
-                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                if (cursor.moveToFirst()) cursor.getString(nameIndex) else "unknown"
-            } ?: "unknown"
+    val gridPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        try {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+        } catch (_: SecurityException) {}
+        gridFilePath = uri.toString()
+    }
 
-            if (configMode == "COMMAND") {
-                cmdUri = it.toString()
-                cmdFileName = displayName
-            } else {
-                gridUri = it.toString()
-                gridFileName = displayName
-            }
-        }
+    val splitPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        try {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+        } catch (_: SecurityException) {}
+        splitFilePath = uri.toString()
     }
 
     // --- 核心逻辑 ---
     val startGeneration = {
-        val currentInput = when {
-            isAbsolute_path -> if (configMode == "COMMAND") cmdFilePath else gridFilePath
-            else -> if (configMode == "COMMAND") cmdUri else gridUri
+        val currentInput = when (configMode) {
+            "COMMAND" -> cmdFilePath
+            "GRID" -> gridFilePath
+            else -> splitFilePath // SPLIT 模式
         }
 
         if (currentInput.isBlank()) {
@@ -152,20 +164,18 @@ fun StructureGeneratorScreen(onBack: () -> Unit) {
 
                     val rawFileName = getSafeFileName(context, currentInput, "generated")
                     
-                    // 读取文本内容
-                    var content = readTextFromUriOrPath(context, currentInput)
-                    
-                    // 【新拦截逻辑】如果开启了蛇形往复开关，在此对文本内容进行重构注入
-                    if (configMode == "COMMAND" && isSerpentine) {
-                        val parsedMaxHeight = maxHeight.toIntOrNull() ?: 50
-                        val parsedSpacing = zSpacing.toIntOrNull() ?: 2
-                        content = enforceVerticalSerpentinePattern(content, parsedMaxHeight, parsedSpacing)
-                    }
-
                     // 2. 为了支持多文件，建立一个独立的临时中转夹
                     val taskTempDir = File(context.cacheDir, "task_${System.currentTimeMillis()}_$rawFileName").apply { mkdirs() }
 
                     if (configMode == "COMMAND") {
+                        val content = readTextFromUriOrPath(context, currentInput).let { raw ->
+                            if (isSerpentine) {
+                                val parsedMaxHeight = maxHeight.toIntOrNull() ?: 50
+                                val parsedSpacing = zSpacing.toIntOrNull() ?: 2
+                                enforceVerticalSerpentinePattern(raw, parsedMaxHeight, parsedSpacing)
+                            } else raw
+                        }
+
                         // 命令模式：生成单结构文件
                         val singleFile = File(taskTempDir, "$rawFileName.mcstructure")
                         val params = BuildParams(
@@ -187,7 +197,8 @@ fun StructureGeneratorScreen(onBack: () -> Unit) {
                                 }
                             }
                         }
-                    } else {
+                    } else if (configMode == "GRID") {
+                        val content = readTextFromUriOrPath(context, currentInput)
                         // 文本阵列模式：调用重构后的多文件切片密铺函数
                         withContext(Dispatchers.IO) {
                             val ruleList: List<McStructureExporter.PrefixRule> = rulesJson.split(",")
@@ -212,11 +223,48 @@ fun StructureGeneratorScreen(onBack: () -> Unit) {
                         // 交付合并输出流水线
                         handleFinalProcessing(context, taskTempDir, baseOutputDir, rawFileName, isExportAsPack)
                         isGenerating = false
+                    } else {
+                        // SPLIT 模式：结构大文件分割
+                        withContext(Dispatchers.IO) {
+                            // 自适应处理：若为 content:// URI 则拉取副本进行内存隔离分割，避免底层 File 直接加载抛错
+                            val srcFile = if (currentInput.startsWith("content://")) {
+                                val tempInput = File(context.cacheDir, "temp_split_src.mcstructure")
+                                context.contentResolver.openInputStream(Uri.parse(currentInput))?.use { input ->
+                                    tempInput.outputStream().use { output -> input.copyTo(output) }
+                                } ?: throw Exception("无法从系统 Provider 读取源文件流")
+                                tempInput
+                            } else {
+                                val f = File(currentInput)
+                                if (!f.exists()) throw Exception("待切分结构文件不存在")
+                                f
+                            }
+
+                            // 核心：调用原生的分割切片代码
+                            McStructureExporter.splitMcStructure(
+                                inputFile = srcFile,
+                                outputDir = taskTempDir,
+                                limitX = limX.toIntOrNull() ?: 64,
+                                limitZ = limZ.toIntOrNull() ?: 64
+                            )
+
+                            // 临时中转文件物理释放
+                            if (currentInput.startsWith("content://")) {
+                                srcFile.delete()
+                            }
+                        }
+
+                        // 交付最终打包/分发流程
+                        handleFinalProcessing(context, taskTempDir, baseOutputDir, rawFileName, isExportAsPack)
+                        isGenerating = false
                     }
                 } catch (e: Exception) {
-                    isGenerating = false
-                    Toast.makeText(context, "❌ 运行失败: ${e.message}", Toast.LENGTH_LONG).show()
-                }
+    isGenerating = false
+    Toast.makeText(context, "❌ 运行失败: ${e.javaClass.simpleName}: ${e.message}", Toast.LENGTH_LONG).show()
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    val clip = ClipData.newPlainText("", "运行失败: ${e.javaClass.simpleName}: ${e.message}")
+    clipboard.setPrimaryClip(clip)
+    
+}
             }
         }
     }
@@ -250,12 +298,11 @@ fun StructureGeneratorScreen(onBack: () -> Unit) {
                 onCmdPathChange = { cmdFilePath = it },
                 gridFilePath = gridFilePath,
                 onGridPathChange = { gridFilePath = it },
-                cmdFileName = cmdFileName,
-                gridFileName = gridFileName,
-                cmdUri = cmdUri,
-                gridUri = gridUri,
-                systemFilePickerLauncher = systemFilePickerLauncher,
-                isAbsolute_path = isAbsolute_path,
+                splitFilePath = splitFilePath,
+                onSplitPathChange = { splitFilePath = it },
+                cmdPickerLauncher = cmdPickerLauncher,
+                gridPickerLauncher = gridPickerLauncher,
+                splitPickerLauncher = splitPickerLauncher,
                 isSerpentine = isSerpentine,
                 onSerpentineChange = { isSerpentine = it },
                 maxHeight = maxHeight,
@@ -268,7 +315,7 @@ fun StructureGeneratorScreen(onBack: () -> Unit) {
             
             Card(modifier = Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(2.dp)) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("通用配置", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text("切片范围配置", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedTextField(
                             value = limX, onValueChange = { limX = it },
@@ -313,7 +360,6 @@ fun StructureGeneratorScreen(onBack: () -> Unit) {
             confirmButton = {
                 TextButton(onClick = {
                     prefs.edit().clear().apply()
-                    featurePrefs.edit().clear().apply()
                     showResetDialog = false
                     onBack()
                 }) { Text("确定", color = Color.Red) }
@@ -354,7 +400,7 @@ suspend fun handleFinalProcessing(
                     finalPackFile.delete()
                     
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(context, "📦 密铺行为包一键生成成功: ${finalDestination.name}", Toast.LENGTH_LONG).show()
+                        Toast.makeText(context, "📦 行为包/结构模组一键生成成功: ${finalDestination.name}", Toast.LENGTH_LONG).show()
                     }
                 } else {
                     throw Exception("压缩映射流故障")
@@ -372,7 +418,7 @@ suspend fun handleFinalProcessing(
             taskTempDir.deleteRecursively()
 
             withContext(Dispatchers.Main) {
-                Toast.makeText(context, "🎉 多切片裸文件密铺导出至子目录: /${packName}/", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, "🎉 多切片裸文件导出至子目录: /${packName}/", Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -383,10 +429,10 @@ fun InputConfigCard(
     mode: String, onModeChange: (String) -> Unit,
     cmdPath: String, onCmdPathChange: (String) -> Unit,
     gridFilePath: String, onGridPathChange: (String) -> Unit,
-    cmdFileName: String, gridFileName: String,
-    cmdUri: String, gridUri: String,
-    systemFilePickerLauncher: ManagedActivityResultLauncher<Array<String>, Uri?>,
-    isAbsolute_path: Boolean,
+    splitFilePath: String, onSplitPathChange: (String) -> Unit,
+    cmdPickerLauncher: androidx.activity.result.ActivityResultLauncher<Array<String>>,
+    gridPickerLauncher: androidx.activity.result.ActivityResultLauncher<Array<String>>,
+    splitPickerLauncher: androidx.activity.result.ActivityResultLauncher<Array<String>>,
     isSerpentine: Boolean, onSerpentineChange: (Boolean) -> Unit,
     maxHeight: String, onMaxHeightChange: (String) -> Unit,
     zSpacing: String, onZSpacingChange: (String) -> Unit,
@@ -396,61 +442,77 @@ fun InputConfigCard(
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("输入配置", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
 
-            // 模式切换
+            // 三模式段控制按钮组
             SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                 SegmentedButton(
                     selected = mode == "COMMAND",
                     onClick = { onModeChange("COMMAND") },
-                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
-                ) { Text("命令文件") }
+                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 3)
+                ) { Text("命令文件", style = MaterialTheme.typography.labelSmall) }
                 SegmentedButton(
                     selected = mode == "GRID",
                     onClick = { onModeChange("GRID") },
-                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
-                ) { Text("文本阵列") }
+                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 3)
+                ) { Text("文本阵列", style = MaterialTheme.typography.labelSmall) }
+                SegmentedButton(
+                    selected = mode == "SPLIT",
+                    onClick = { onModeChange("SPLIT") },
+                    shape = SegmentedButtonDefaults.itemShape(index = 2, count = 3)
+                ) { Text("结构切割", style = MaterialTheme.typography.labelSmall) }
             }
 
-            // 路径输入/选择
-            val labelText = if (mode == "COMMAND") "命令文件 (.txt)" else "文本阵列 (.txt)"
-            if (isAbsolute_path) {
-                OutlinedTextField(
-                    value = if (mode == "COMMAND") cmdPath else gridFilePath,
-                    onValueChange = if (mode == "COMMAND") onCmdPathChange else onGridPathChange,
-                    label = { Text("输入$labelText 绝对路径") },
-                    modifier = Modifier.fillMaxWidth(),
-                    leadingIcon = { Icon(Icons.Default.Edit, null) }
-                )
-            } else {
-                val currentUri = if (mode == "COMMAND") cmdUri else gridUri
-                val currentName = if (mode == "COMMAND") cmdFileName else gridFileName
-                
-                OutlinedCard(
-                    onClick = { systemFilePickerLauncher.launch(arrayOf("text/plain", "application/octet-stream")) },
-                    colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
-                ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp).fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("已选文件", style = MaterialTheme.typography.labelSmall)
-                            Text(
-                                text = if (currentUri.isEmpty()) "点击选择文件" else currentName,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = if (currentUri.isEmpty()) Color.Gray else MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.Bold
-                            )
+            // 自适应路径输入框（融合了绝对路径与 URI 选择器）
+            when (mode) {
+                "COMMAND" -> {
+                    OutlinedTextField(
+                        value = cmdPath,
+                        onValueChange = onCmdPathChange,
+                        label = { Text("命令文件路径 (支持选择 .txt)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        trailingIcon = {
+                            IconButton(onClick = { 
+                                cmdPickerLauncher.launch(arrayOf("text/plain", "application/octet-stream"))
+                            }) {
+                                Icon(Icons.Filled.Folder, contentDescription = "选择输入文件")
+                            }
                         }
-                        Icon(Icons.Default.FileOpen, contentDescription = null)
-                    }
+                    )
+                }
+                "GRID" -> {
+                    OutlinedTextField(
+                        value = gridFilePath,
+                        onValueChange = onGridPathChange,
+                        label = { Text("文本阵列路径 (支持选择 .txt)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        trailingIcon = {
+                            IconButton(onClick = { 
+                                gridPickerLauncher.launch(arrayOf("text/plain", "application/octet-stream"))
+                            }) {
+                                Icon(Icons.Filled.Folder, contentDescription = "选择输入文件")
+                            }
+                        }
+                    )
+                }
+                "SPLIT" -> {
+                    OutlinedTextField(
+                        value = splitFilePath,
+                        onValueChange = onSplitPathChange,
+                        label = { Text("切割大文件路径 (支持选择 .mcstructure)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        trailingIcon = {
+                            IconButton(onClick = { 
+                                splitPickerLauncher.launch(arrayOf("application/octet-stream", "*/*"))
+                            }) {
+                                Icon(Icons.Filled.Folder, contentDescription = "选择输入文件")
+                            }
+                        }
+                    )
                 }
             }
 
             // 命令文件模式下的动态配置项（含 Switch 开关控制）
             AnimatedVisibility(visible = mode == "COMMAND") {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    // 新增的上下蛇形往复重构开关 UI
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -463,7 +525,6 @@ fun InputConfigCard(
                         Switch(checked = isSerpentine, onCheckedChange = onSerpentineChange)
                     }
 
-                    // 开关开启时，在下方动态展开原有输入框
                     AnimatedVisibility(visible = isSerpentine) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedTextField(
@@ -485,6 +546,7 @@ fun InputConfigCard(
                 }
             }
 
+            // 文本阵列模式下的配置项
             AnimatedVisibility(visible = mode == "GRID") {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("朝向映射规则", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)

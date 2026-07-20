@@ -2,6 +2,7 @@ package command.plus
 
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -28,109 +29,258 @@ import java.io.File
 import androidx.compose.ui.Alignment
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.sp
-
-import android.content.ComponentName
-import android.content.ServiceConnection
-import android.content.pm.PackageManager
-import android.os.IBinder
-import rikka.shizuku.Shizuku
-// --- 状态与 SharedPreferences 扩展 ---
+import androidx.compose.ui.graphics.Color
 private const val PREFS_NAME = "ScriptPrefs"
+
+
 
 @Composable
 fun ScriptCommandScreen(onBack: () -> Unit) {
+    var currentScreen by remember { mutableStateOf("home") }
+    var scriptToEdit by remember { mutableStateOf("") }
+    var targetSaveFile by remember { mutableStateOf<File?>(null) }
+
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background
     ) {
-        HomeScreen(onBack = onBack)
+        when (currentScreen) {
+            "home" -> HomeScreen(
+                onBack = onBack,
+                onNavigateToEditor = { file, initialText ->
+                    targetSaveFile = file
+                    scriptToEdit = initialText
+                    currentScreen = "editor"
+                }
+            )
+            "editor" -> ScriptEditorScreen(
+                initialScriptText = scriptToEdit,
+                onBack = { currentScreen = "home" },
+                onSaveComplete = { resultText ->
+                    targetSaveFile?.let { file ->
+                        try {
+                            file.parentFile?.mkdirs()
+                            file.writeText(resultText)
+                        } catch (e: Exception) {
+                            // 异常处理
+                        }
+                    }
+                    currentScreen = "home"
+                }
+            )
+        }
     }
 }
 
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(onBack: () -> Unit) {
+fun HomeScreen(onBack: () -> Unit, onNavigateToEditor: (File, String) -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val coroutineScope = rememberCoroutineScope()
-    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    val prefs = remember { context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }
+    
+    // --- 目录定义与初始化 ---
+    val scriptDir = remember { File(context.getExternalFilesDir(null), "script").apply { mkdirs() } }
+    val templateDir = remember { File(context.getExternalFilesDir(null), "templates").apply { mkdirs() } }
+    val dir1 = remember { File(context.getExternalFilesDir(null), "MusicOutput").apply { mkdirs() } }
+    val dir2 = remember { File(context.getExternalFilesDir(null), "PixelArtResult").apply { mkdirs() } }
 
-    // 全局状态管理：悬浮窗真实状态
+    // 内置默认脚本模板
+    LaunchedEffect(Unit) {
+        val defaultTemplate = File(templateDir, "内置通用模板.txt")
+        if (!defaultTemplate.exists()) {
+            val defaultContent = """
+.if(${'$'}isBlockType == "") // 判断指令输入流程是否结束
+.fToast("流程结束") // 发出流程结束提示
+.end
+.if(${'$'}isBlockType == true) // 判断当前指令区块是否为"聊天栏"
+.exeAction(1300,35,1300,35,50) // 打开聊天框(点击"打开聊天框"按钮)
+.sleep(300) // 延迟300毫秒
+.exeAction(1535,1135,1535,1135,50) // 点击"输入框"
+.sleep(50) // 延迟50毫秒
+.setText(${'$'}ItemText) // 向输入框写入当前指令项内容
+.nextItem() // 推进指令项索引
+.exeAction(2500,1100,2505,1105,100) // 点击"发送键"
+.sleep(300) // 延迟300毫秒
+.exeAction(2500,1100,2505,1105,100) // 再次点击"发送键"(提升稳定性)
+.if(${'$'}isNextLoop == true) // 判断当前指令项是否不中断继续自动操作
+.reStart() // 将脚本重置,从头开始执行一遍
+.end
+.end
+.if(${'$'}isBlockType == false) // 判断当前指令区块是否为"聊天栏"
+.exeAction(1850,560,1850,560,50) // 打开命令方块(点击"使用键")
+.sleep(500) // 延迟500毫秒
+.if(${'$'}configA > 0) // 当前指令项的指令区块 "方块类型" 为连锁或循环时
+.exeAction(840,540,840,540,50) // 点击 "方块类型"
+.sleep(100) // 延迟100毫秒
+.if(${'$'}configA == 1) // 当前指令项的指令区块 "方块类型" 为连锁时
+.exeAction(585,625,585,625,50) // 点击 "连锁"
+.else // 当前指令项的指令区块 "方块类型" 为循环时
+.exeAction(585,715,585,715,50) // 点击 "循环"
+.end
+.sleep(100) // 延迟100毫秒
+.end
+.if(${'$'}configB > 0) // 当前指令项的指令区块 "条件" 为有条件时
+.exeAction(840,795,840,795,50) // 点击 "条件"
+.sleep(100) // 延迟100毫秒
+.exeAction(840,765,840,765,50) // 点击 "有条件"
+.sleep(100) // 延迟100毫秒
+.end
+.if(${'$'}configC > 0) // 当前指令项的指令区块 "红石" 为始终活动时
+.exeAction(840,995,840,995,50) // 点击 "红石"
+.sleep(100) // 延迟100毫秒
+.exeAction(840,780,840,780,50) // 点击 "始终活动"
+.sleep(100) // 延迟100毫秒
+.end
+.exeAction(1470,370,1470,370,50) // 点击 "命令输入框"
+.sleep(100) // 延迟100毫秒
+.setText(${'$'}ItemText) // 向命令输入框输入当前指令项内容
+.nextItem() // 推进指令项索引
+.exeAction(2250,160,2250,160,50) // 点击命令方块退出键
+.end
+            """.trimIndent()
+            try { defaultTemplate.writeText(defaultContent) } catch (e: Exception) {}
+        }
+    }
+
+    // --- 响应式文件列表监测 ---
+    val knownMusicFiles = rememberDirectoryFiles(listOf(dir1, dir2))
+    val knownScriptFiles = rememberDirectoryFiles(listOf(scriptDir))
+    val knownTemplateFiles = rememberDirectoryFiles(listOf(templateDir))
+
+    // --- 使用提供的扩展函数持久化状态 ---
+    var sourceMode by rememberPreference("source_mode", 0, prefs)
+    var selectedKnownMusicPath by rememberPreference("selected_known_music_path", "", prefs)
+    var linkInput by rememberPreference("link_input", "", prefs)
+
+    var scriptSelectionMode by rememberPreference("script_mode", 0, prefs)
+    var selectedDefaultScriptPath by rememberPreference("default_script", "", prefs)
+    var specificScriptPath by rememberPreference("specific_path", "", prefs)
+    
+    var selectedTemplatePath by rememberPreference("selected_template_path", "", prefs)
+
+    // --- 底部弹窗控制 ---
+    var showBottomSheetType by remember { mutableStateOf("") } // "create_template" 或 "generate_script"
+    var inputNameText by remember { mutableStateOf("") }
+    var locationMode by remember { mutableIntStateOf(0) } 
+    var customPath by remember { mutableStateOf("") }
+
+    if (showBottomSheetType.isNotEmpty()) {
+        ModalBottomSheet(
+            onDismissRequest = { showBottomSheetType = "" },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp)
+                    .navigationBarsPadding(),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Text(
+                    text = if (showBottomSheetType == "create_template") "创建新模板" else "基于当前模板生成运行脚本",
+                    style = MaterialTheme.typography.titleLarge
+                )
+                
+                OutlinedTextField(
+                    value = inputNameText,
+                    onValueChange = { inputNameText = it },
+                    label = { Text(if (showBottomSheetType == "create_template") "模板名称 (无需加 .txt)" else "脚本文件名称 (无需加 .txt)") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                if (showBottomSheetType == "generate_script") {
+                    Text("生成脚本存储位置：", style = MaterialTheme.typography.bodyMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(selected = locationMode == 0, onClick = { locationMode = 0 })
+                            Text("内部默认目录")
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(selected = locationMode == 1, onClick = { locationMode = 1 })
+                            Text("自定义绝对路径")
+                        }
+                    }
+
+                    if (locationMode == 1) {
+                        OutlinedTextField(
+                            value = customPath,
+                            onValueChange = { customPath = it },
+                            label = { Text("请输入绝对路径") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+
+                Button(
+                    onClick = {
+                        if (inputNameText.isBlank()) return@Button
+                        val finalName = if (inputNameText.lowercase().endsWith(".txt")) inputNameText else "$inputNameText.txt"
+                        
+                        if (showBottomSheetType == "create_template") {
+                            // 场景 A: 创建新模板并进入编辑器
+                            val newTemplateFile = File(templateDir, finalName)
+                            showBottomSheetType = ""
+                            inputNameText = ""
+                            onNavigateToEditor(newTemplateFile, "// 在此配置新的规则模板\n")
+                        } else {
+                            // 场景 B: 读取选中的模板内容，写入到指定的脚本文件目录
+                            val currentTemplateFile = File(selectedTemplatePath)
+                            if (currentTemplateFile.exists()) {
+                                val templateContent = currentTemplateFile.readText()
+                                val targetScriptFile = if (locationMode == 0) {
+                                    File(scriptDir, finalName)
+                                } else {
+                                    File(customPath, finalName)
+                                }
+                                try {
+                                    targetScriptFile.parentFile?.mkdirs()
+                                    targetScriptFile.writeText(templateContent)
+                                    Toast.makeText(context, "脚本文件生成成功！", Toast.LENGTH_SHORT).show()
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "生成失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                            showBottomSheetType = ""
+                            inputNameText = ""
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("确认提交并处理")
+                }
+            }
+        }
+    }
+
+    // --- 同步悬浮窗与无障碍服务状态 ---
     var isWindowShown by remember { mutableStateOf(false) }
-
-    // --- 同步悬浮窗状态 ---
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 val service = MainAccessibilityService.getInstance()
                 isWindowShown = service?.isWindowShown() == true
-                
-                // 绑定监听器：即使在 Service 内部或通过悬浮窗自带的按钮关闭，也能通知到 UI 更新文字
                 try {
-                    service?.setWindowStateListener { isShown ->
-                        isWindowShown = isShown
-                    }
-                } catch (e: Exception) {
-                    // 如果你的 Service 没有提供 setWindowStateListener，请忽略
-                }
+                    service?.setWindowStateListener { isShown -> isWindowShown = isShown }
+                } catch (e: Exception) {}
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
-            try {
-                MainAccessibilityService.getInstance()?.setWindowStateListener(null)
-            } catch (e: Exception) {}
+            try { MainAccessibilityService.getInstance()?.setWindowStateListener(null) } catch (e: Exception) {}
         }
     }
 
-    // --- 卡片1：选择指令文件 状态 ---
-    var sourceMode by remember { mutableIntStateOf(0) }
-    val sourceOptions = listOf("无", "从已知中获取", "从链接中获取")
-    
-    val dir1 = remember {
-    File(context.getExternalFilesDir(null), "MusicOutput").apply { mkdirs() }
-}
-
-val dir2 = remember {
-    File(context.getExternalFilesDir(null), "PixelArtResult").apply { mkdirs() }
-}
-
-val knownMusicFiles = rememberDirectoryFiles(listOf(dir1, dir2))
-    var selectedKnownMusicPath by remember { mutableStateOf("") }
-    var linkInput by remember { mutableStateOf("") }
-
-    // --- 卡片2：自动操作脚本 状态 ---
-    var scriptSelectionMode by remember { mutableIntStateOf(prefs.getInt("script_mode", 0)) }
-    val scriptSourceOptions = listOf("在默认中选择", "选择指定文件")
-    
-    var selectedDefaultScriptPath by remember { mutableStateOf(prefs.getString("default_script", "") ?: "") }
-    var specificScriptPath by remember { mutableStateOf(prefs.getString("specific_path", "") ?: "") }
-
-    val scriptDir = remember { File(context.getExternalFilesDir(null), "script").apply { mkdirs() } }
-    val knownScriptFiles = rememberDirectoryFiles(listOf(scriptDir))
-
-    // SharedPreferences 保存闭包
-    val saveScriptMode = { mode: Int ->
-        scriptSelectionMode = mode
-        prefs.edit().putInt("script_mode", mode).apply()
-    }
-    val saveDefaultScript = { path: String ->
-        selectedDefaultScriptPath = path
-        prefs.edit().putString("default_script", path).apply()
-    }
-    val saveSpecificPath = { path: String ->
-        specificScriptPath = path
-        prefs.edit().putString("specific_path", path).apply()
-    }
-    
     var isOk by remember { mutableStateOf((ShizukuManager.getCurrentState() == ShizukuManager.State.READY)) }
+    val sourceOptions = listOf("无", "从已知中获取", "从链接中获取")
+    val scriptSourceOptions = listOf("在默认中选择", "选择指定文件")
 
     Scaffold(
-    topBar = {
+        topBar = {
             TopAppBar(
                 title = { Text("自动操作") },
                 navigationIcon = {
@@ -140,7 +290,7 @@ val knownMusicFiles = rememberDirectoryFiles(listOf(dir1, dir2))
                 }
             )
         }
-) { paddingValues ->
+    ) { paddingValues ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -149,97 +299,58 @@ val knownMusicFiles = rememberDirectoryFiles(listOf(dir1, dir2))
                 .padding(25.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            
-            // --- 按钮区 ---
-            Button(
-                onClick = { requestPermissions(context) },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("获取权限 (无障碍 + 悬浮窗 + 管理所有文件) (必选)")
+            // --- 顶部控制权限及常驻按钮 ---
+            Button(onClick = { requestPermissions(context) }, modifier = Modifier.fillMaxWidth()) {
+                Text("获取权限 (无障碍 + 悬浮窗 + 存储管理)")
             }
             
             Button(
                 onClick = {
                     ShizukuManager.init(context)
-                    
-                        if (ShizukuManager.getCurrentState() == ShizukuManager.State.NO_BINDER) Toast.makeText(context, "未检测到 Shizuku 服务，请先启动应用。", Toast.LENGTH_SHORT).show()
-                        
-                        if (ShizukuManager.getCurrentState() == ShizukuManager.State.READY) Toast.makeText(context, "已连接", Toast.LENGTH_SHORT).show()
-                        
+                    if (ShizukuManager.getCurrentState() == ShizukuManager.State.NO_BINDER) {
+                        Toast.makeText(context, "未检测到 Shizuku 服务", Toast.LENGTH_SHORT).show()
+                    }
+                    isOk = (ShizukuManager.getCurrentState() == ShizukuManager.State.READY)
+                    ShizukuManager.onStateChanged = { state ->
                         isOk = (ShizukuManager.getCurrentState() == ShizukuManager.State.READY)
-                        
-                    
-                        ShizukuManager.onStateChanged = { state ->
-                        isOk = (ShizukuManager.getCurrentState() == ShizukuManager.State.READY)
-                         //if (state == ShizukuManager.State.READY) Toast.makeText(context, "连接成功！", Toast.LENGTH_SHORT).show()
-                         if (state == ShizukuManager.State.DEAD) Toast.makeText(context, "连接超时，请尝试重置应用Shizuku授权", Toast.LENGTH_SHORT).show()
-                        
-                        }
-                    
-                        
-                        
-                 
-                  
-                    },
+                        if (state == ShizukuManager.State.DEAD) Toast.makeText(context, "连接超时，请检查授权", Toast.LENGTH_SHORT).show()
+                    }
+                },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Shizuku授权 (用于执行adb命令) (可选)")
+                Text("Shizuku 授权 (可选)")
             }
             
             if (!isOk) {
-        Text(
-            text = "请注意: 当前无法使用Shizuku执行相关命令",
-            color = Color.Red,
-            fontSize = 12.sp
-        )
+                Text(text = "请注意: 当前无法使用 Shizuku 执行相关命令", color = Color.Red, fontSize = 12.sp)
             }
 
             Button(
                 onClick = {
-                  
-
                     val service = MainAccessibilityService.getInstance()
                     if (service == null) {
                         Toast.makeText(context, "服务未开启，请先开启无障碍", Toast.LENGTH_SHORT).show()
                         return@Button
                     }
-
                     if (service.isWindowShown()) {
                         service.hideFloatingWindow()
                         isWindowShown = false
                     } else {
                         DataManager.resetAll()
                         try {
-                            if (sourceMode == 1) {
-                                DataManager.loadFromFile(selectedKnownMusicPath)
-                            } else if (sourceMode == 2) {
-                                DataManager.loadFromFile(linkInput)
-                            }
+                            if (sourceMode == 1) DataManager.loadFromFile(selectedKnownMusicPath)
+                            else if (sourceMode == 2) DataManager.loadFromFile(linkInput)
                         } catch (e: Exception) {
-                            Toast.makeText(context, "加载失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "加载指令失败: ${e.message}", Toast.LENGTH_SHORT).show()
                         }
 
-                        val fileToRun = if (scriptSelectionMode == 0) {
-                            File(selectedDefaultScriptPath)
-                        } else {
-                            File(specificScriptPath)
-                        }
-
+                        val fileToRun = if (scriptSelectionMode == 0) File(selectedDefaultScriptPath) else File(specificScriptPath)
                         val fileName = fileToRun.absolutePath
 
-                        if (fileName.isBlank() || fileName == "无") {
-                            Toast.makeText(context, "未选择有效脚本文件", Toast.LENGTH_SHORT).show()
+                        if (fileName.isBlank() || !fileToRun.exists() || !fileName.lowercase().endsWith(".txt")) {
+                            Toast.makeText(context, "无效的执行脚本文件，请先前往模板管理器生成", Toast.LENGTH_SHORT).show()
                             return@Button
                         }
-                        if (!fileName.lowercase().endsWith(".txt")) {
-                            Toast.makeText(context, "脚本文件必须是 .txt 格式", Toast.LENGTH_SHORT).show()
-                            return@Button
-                        }
-                        if (!fileToRun.exists() && scriptSelectionMode == 1) {
-                            Toast.makeText(context, "指定的文件不存在", Toast.LENGTH_SHORT).show()
-                            return@Button
-                        }
-
                         service.showFloatingWindow(fileName)
                         isWindowShown = true
                     }
@@ -255,95 +366,128 @@ val knownMusicFiles = rememberDirectoryFiles(listOf(dir1, dir2))
                 elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text("选择指令文件", style = MaterialTheme.typography.titleLarge)
+                    Text("选择指令文件", style = MaterialTheme.typography.titleMedium)
                     Spacer(modifier = Modifier.height(8.dp))
-                    
-                    DropdownMenuBox(
-                        options = sourceOptions,
-                        selectedIndex = sourceMode,
-                        onOptionSelected = { sourceMode = it }
-                    )
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
+                    DropdownMenuBox(options = sourceOptions, selectedIndex = sourceMode, onOptionSelected = { sourceMode = it })
                     if (sourceMode == 1) {
-                        Text("已知项：")
+                        Spacer(modifier = Modifier.height(8.dp))
                         val displayOptions = if (knownMusicFiles.isEmpty()) listOf("无") else knownMusicFiles.map { File(it).name }
-                        
-                        // 修复点 1：切换到“已知项”时，若列表不为空且尚未选择任何项，自动选中第 1 项
-                        LaunchedEffect(knownMusicFiles, sourceMode) {
-                            if (sourceMode == 1 && knownMusicFiles.isNotEmpty() && selectedKnownMusicPath.isBlank()) {
-                                selectedKnownMusicPath = knownMusicFiles[0]
-                            }
+                        LaunchedEffect(knownMusicFiles) {
+                            if (knownMusicFiles.isNotEmpty() && selectedKnownMusicPath.isBlank()) selectedKnownMusicPath = knownMusicFiles[0]
                         }
-
                         val selectedIndex = displayOptions.indexOf(File(selectedKnownMusicPath).name).takeIf { it >= 0 } ?: 0
-                        
-                        DropdownMenuBox(
-                            options = displayOptions,
-                            selectedIndex = selectedIndex,
-                            onOptionSelected = { 
-                                selectedKnownMusicPath = if (displayOptions[it] == "无") "" else knownMusicFiles[it] 
-                            }
-                        )
+                        DropdownMenuBox(options = displayOptions, selectedIndex = selectedIndex, onOptionSelected = { selectedKnownMusicPath = if (displayOptions[it] == "无") "" else knownMusicFiles[it] })
                     } else if (sourceMode == 2) {
-                        OutlinedTextField(
-                            value = linkInput,
-                            onValueChange = { linkInput = it },
-                            label = { Text("在此输入链接") },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
-                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(value = linkInput, onValueChange = { linkInput = it }, label = { Text("输入外部链接") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                     }
                 }
             }
 
-            // --- 卡片 2: 自动操作脚本 ---
+            // --- 卡片 2: 运行脚本选择器 (仅用于指定运行实例) ---
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text("自动操作脚本", style = MaterialTheme.typography.titleLarge)
+                    Text("选择当前执行脚本文件", style = MaterialTheme.typography.titleMedium)
                     Spacer(modifier = Modifier.height(8.dp))
-
-                    // 修复点 2：改为下拉菜单样式
-                    DropdownMenuBox(
-                        options = scriptSourceOptions,
-                        selectedIndex = scriptSelectionMode,
-                        onOptionSelected = { saveScriptMode(it) }
-                    )
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
+                    DropdownMenuBox(options = scriptSourceOptions, selectedIndex = scriptSelectionMode, onOptionSelected = { scriptSelectionMode = it })
+                    Spacer(modifier = Modifier.height(8.dp))
                     if (scriptSelectionMode == 0) {
                         val displayOptions = if (knownScriptFiles.isEmpty()) listOf("无") else knownScriptFiles.map { File(it).name }
-                        
-                        // 初始化默认选中第 1 项
-                        LaunchedEffect(knownScriptFiles, scriptSelectionMode) {
-                            if (scriptSelectionMode == 0 && knownScriptFiles.isNotEmpty() && selectedDefaultScriptPath.isBlank()) {
-                                saveDefaultScript(knownScriptFiles[0])
-                            }
+                        LaunchedEffect(knownScriptFiles) {
+                            if (knownScriptFiles.isNotEmpty() && selectedDefaultScriptPath.isBlank()) selectedDefaultScriptPath = knownScriptFiles[0]
+                        }
+                        val selectedIndex = displayOptions.indexOf(File(selectedDefaultScriptPath).name).takeIf { it >= 0 } ?: 0
+                        DropdownMenuBox(options = displayOptions, selectedIndex = selectedIndex, onOptionSelected = { selectedDefaultScriptPath = if (displayOptions[it] == "无") "" else knownScriptFiles[it] })
+                    } else {
+                        OutlinedTextField(value = specificScriptPath, onValueChange = { specificScriptPath = it }, label = { Text("输入绝对路径 (.txt)") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                    }
+                }
+            }
+
+            // --- 新增卡片 3: 脚本规则模板管理器 ---
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("脚本模板管理器", style = MaterialTheme.typography.titleMedium)
+                    
+                    val templateDisplayOptions = if (knownTemplateFiles.isEmpty()) listOf("暂无模板") else knownTemplateFiles.map { File(it).name }
+                    LaunchedEffect(knownTemplateFiles) {
+                        if (knownTemplateFiles.isNotEmpty() && selectedTemplatePath.isBlank()) selectedTemplatePath = knownTemplateFiles[0]
+                    }
+                    val selectedTemplateIndex = templateDisplayOptions.indexOf(File(selectedTemplatePath).name).takeIf { it >= 0 } ?: 0
+                    
+                    // 模板下拉选择菜单
+                    DropdownMenuBox(
+                        options = templateDisplayOptions,
+                        selectedIndex = selectedTemplateIndex,
+                        onOptionSelected = {
+                            selectedTemplatePath = if (templateDisplayOptions[it] == "暂无模板") "" else knownTemplateFiles[it]
+                        }
+                    )
+
+                    // 模板操作功能按钮网格排版
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = {
+                                val file = File(selectedTemplatePath)
+                                if (file.exists()) {
+                                    onNavigateToEditor(file, file.readText())
+                                } else {
+                                    Toast.makeText(context, "请先选择一个有效模板", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                        ) {
+                            Text("修改选中模板", fontSize = 12.sp)
                         }
 
-                        val selectedIndex = displayOptions.indexOf(File(selectedDefaultScriptPath).name).takeIf { it >= 0 } ?: 0
-                        
-                        DropdownMenuBox(
-                            options = displayOptions,
-                            selectedIndex = selectedIndex,
-                            onOptionSelected = { 
-                                val path = if (displayOptions[it] == "无") "" else knownScriptFiles[it]
-                                saveDefaultScript(path)
+                        Button(
+                            onClick = {
+                                val file = File(selectedTemplatePath)
+                                if (file.exists() && file.name != "内置通用模板.txt") {
+                                    file.delete()
+                                    selectedTemplatePath = ""
+                                    Toast.makeText(context, "模板已删除", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, "无法删除该项或未选模板", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                        ) {
+                            Text("删除模板", fontSize = 12.sp)
+                        }
+                    }
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f))
+
+                    // 基于模板实例化文件的操作
+                    Button(
+                        onClick = {
+                            if (selectedTemplatePath.isBlank() || !File(selectedTemplatePath).exists()) {
+                                Toast.makeText(context, "请先选定一个基础模板", Toast.LENGTH_SHORT).show()
+                                return@Button
                             }
-                        )
-                    } else {
-                        OutlinedTextField(
-                            value = specificScriptPath,
-                            onValueChange = { saveSpecificPath(it) },
-                            label = { Text("在此输入绝对路径 (需含 .txt)") },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
-                        )
+                            showBottomSheetType = "generate_script"
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
+                    ) {
+                        Text("选用此模板生成运行脚本文件")
+                    }
+
+                    OutlinedButton(
+                        onClick = { showBottomSheetType = "create_template" },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("＋ 新建空白规则模板")
                     }
                 }
             }
@@ -457,3 +601,5 @@ fun requestPermissions(context: Context) {
     val accessibilityIntent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
     context.startActivity(accessibilityIntent)
 }
+
+// （其余底层的 DropdownMenuBox, rememberDirectoryFiles, requestPermissions 保持不变）

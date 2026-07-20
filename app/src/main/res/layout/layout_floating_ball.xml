@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:clipToPadding="false"
+    android:padding="8dp">
+
+    <!-- 1. 未展开状态的小球 -->
+    <FrameLayout
+        android:id="@+id/layout_collapsed"
+        android:layout_width="46dp"
+        android:layout_height="46dp"
+        android:background="@drawable/bg_circle_cyan"
+        android:elevation="6dp"
+        android:visibility="visible">
+
+        <!-- 靶心十字图标 -->
+        <ImageView
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:layout_gravity="center"
+            android:src="@android:drawable/ic_menu_compass"
+            android:tint="#004D40"/>
+    </FrameLayout>
+
+    <!-- 2. 展开后的胶囊菜单 (仅保留 X 和 √) -->
+    <LinearLayout
+        android:id="@+id/layout_expanded"
+        android:layout_width="128dp"
+        android:layout_height="46dp"
+        android:background="@drawable/bg_capsule_cyan"
+        android:elevation="8dp"
+        android:orientation="horizontal"
+        android:visibility="gone">
+
+        <!-- 取消按钮 X -->
+        <FrameLayout
+            android:id="@+id/btn_cancel"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:background="?android:attr/selectableItemBackgroundBorderless">
+            <ImageView
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:layout_gravity="center"
+                android:src="@android:drawable/ic_menu_close_clear_cancel"
+                android:tint="#004D40"/>
+        </FrameLayout>
+
+        <!-- 分割线 -->
+        <View
+            android:layout_width="1dp"
+            android:layout_height="24dp"
+            android:layout_gravity="center_vertical"
+            android:background="#33004D40"/>
+
+        <!-- 确认按钮 √ -->
+        <FrameLayout
+            android:id="@+id/btn_confirm"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:background="?android:attr/selectableItemBackgroundBorderless">
+            <ImageView
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:layout_gravity="center"
+                android:src="@drawable/ic_check"
+                android:tint="#004D40"/>
+        </FrameLayout>
+
+    </LinearLayout>
+</FrameLayout>

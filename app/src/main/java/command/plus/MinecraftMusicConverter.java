@@ -9,10 +9,6 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.io.BufferedWriter;
 
-/**
- * MinecraftMusicConverter - 优化版
- * 解决了连续违禁值逻辑漏洞及缓冲区数值重复问题
- */
 public class MinecraftMusicConverter {
 
     private final int MODE;
@@ -22,6 +18,8 @@ public class MinecraftMusicConverter {
     private final int MAX_CHARS;
     private final String inputString;
     private final Set<Integer> forbiddenValues;
+    private final boolean enableExtraSensitiveOptimization; // 【新增】是否开启附加违禁数值优化
+    private final NeteaseSensitiveDetector detector;       // 【新增】检测器实例
 
     private MinecraftMusicConverter(Builder b) {
         this.MODE = b.MODE;
@@ -31,6 +29,8 @@ public class MinecraftMusicConverter {
         this.MAX_CHARS = b.MAX_CHARS;
         this.inputString = b.inputString;
         this.forbiddenValues = b.forbiddenValues;
+        this.enableExtraSensitiveOptimization = b.enableExtraSensitiveOptimization;
+        this.detector = b.enableExtraSensitiveOptimization ? new NeteaseSensitiveDetector() : null;
     }
 
     public static class Builder {
@@ -41,6 +41,7 @@ public class MinecraftMusicConverter {
         private int MAX_CHARS = 3000;
         private String inputString = "";
         private Set<Integer> forbiddenValues = new HashSet<>();
+        private boolean enableExtraSensitiveOptimization = true; // 【新增】默认开启
 
         public Builder setMode(int mode) { this.MODE = mode; return this; }
         public Builder setScoreboardName(String name) { this.SCOREBOARD_NAME = name; return this; }
@@ -49,8 +50,100 @@ public class MinecraftMusicConverter {
         public Builder setMaxChars(int chars) { this.MAX_CHARS = chars; return this; }
         public Builder setInputString(String s) { this.inputString = s; return this; }
         public Builder setForbiddenValues(Set<Integer> vals) { this.forbiddenValues = vals; return this; }
+        public Builder setEnableExtraSensitiveOptimization(boolean enable) { this.enableExtraSensitiveOptimization = enable; return this; } // 【新增】
 
         public MinecraftMusicConverter build() { return new MinecraftMusicConverter(this); }
+    }
+
+    // --- 【新增】网易敏感数值检测器 Java 实现版 ---
+    public static class NeteaseSensitiveDetector {
+        private final List<Pattern> patterns = new ArrayList<>();
+
+        public NeteaseSensitiveDetector() {
+            String boundaryLeft64 = "[（）+\\-#0-9一-龥{}/a-z,\\s。°￥¥%:.\\…，~]";
+        String boundaryRight64 = "[（）（）{}+\\-#0-9_a-z一-龥=.\\，,\\—\\…'%１２３４５６７８９０]|\\s[0-9]";
+
+        patterns.add(Pattern.compile("^[\\s\\.,，]*?[6][\\s\\.,，]*?[4][\\s\\.,，]*?[8][\\s\\.,，]*?[9][\\s\\.,，]*?$", Pattern.CASE_INSENSITIVE));
+        patterns.add(Pattern.compile("^[\\s.,，]?[6][\\s.,，]?[4][\\s.,，]?[8][\\s.,，]?[9][\\s.,，]?$", Pattern.CASE_INSENSITIVE));
+        patterns.add(Pattern.compile("^[\\s.,，]?[8][\\s.,，]?[9][\\s.,，]?[6][\\s.,，]?[4][\\s.,，]?$", Pattern.CASE_INSENSITIVE));
+
+        patterns.add(Pattern.compile(
+                "^(?!.?@).?(?<!" + boundaryLeft64 + ")([6б６⒍⑥ｂБЬ㈥⑹][^一-龥1-9１２３４５６７８９０a-z=/]?[4４⒋④㈣⑷Ч４ㄐчㄐ])(?!(" + boundaryRight64 + "))",
+                Pattern.CASE_INSENSITIVE));
+
+        patterns.add(Pattern.compile(
+                "(?<![\\[\\<\\>\\(\\)\\（\\）\\+\\-#0-9一-龥\\\\\\{\\}\\/a-z\\,\\s_。°￥¥%\\:\\.\\…\\'\\\"\\，\\^\\~\\]])[捌八8][^一-龥、\\-#0-9a-z=]*?[九玖9](?!(\\-JPE|\\\\|[\\.\\-][0-9]))(?!([\\[\\<\\>\\(\\)\\（\\）\\{\\}\\+\\-#0-9_a-z一-龥\\=\\*\\.\\，\\,\\—\\…\\'\\\"\\'%１２３４５６７８９０\\]]|\\s[0-9]|\\s法师|\\s求组))",
+                Pattern.CASE_INSENSITIVE));
+
+        patterns.add(Pattern.compile(
+                "(?<![\\<\\>\\(\\%\\~#0-9a-z座米零一二三五七世开期周])([8八捌][9九玖]|[6六陆][4四肆]|[5五][3三][5五])(?![_a-z0-9个道分级进月班舍寝室八节点,\\)])",
+                Pattern.CASE_INSENSITIVE));
+
+        patterns.add(Pattern.compile(
+                "^(?!.*?@).*?(?<![\\[\\<\\>\\(\\)\\（\\）\\+\\-#0-9一-龥\\\\\\{\\}\\/a-z\\,\\s_。°￥¥%\\:\\.\\…\\，\\~\\]])([6б６⒍⑥ｂБЬ㈥⑹六陆][^一-龥1-9１２３４５６７８９０a-z=\\/]*?[4４⒋④㈣⑷四肆Ч４ㄐчㄐ])(?!([\\[\\<\\>\\(\\)\\（\\）\\{\\}\\+\\-#0-9_a-z一-龥\\=\\*\\.\\，\\,\\—\\…\\'%１２３４５６７８９０\\]]|\\s[0-9]))",
+                Pattern.CASE_INSENSITIVE));
+
+        patterns.add(Pattern.compile(
+                "(?<![\\[\\<\\>\\(\\)\\（\\）\\+\\-#0-9一-龥\\\\\\{\\}\\/a-z\\,\\s_。°￥¥%\\:\\.\\…\\，\\~\\]])([捌八8Ⅷ][^一-龥0-9a-z=ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ]*?[九玖9Ⅸ][^一-龥0-9a-z=ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ]*?[6б６⒍⑥ｂБЬ㈥⑹六陆Ⅵ][^一-龥0-9a-z=ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ]*?[0零]?[^一-龥0-9a-z=ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ]*?[4４⒋④㈣⑷四肆Ч４ㄐчㄐⅣ]|1?9?[捌八8][九玖9].?[6六陆溜][0零]?[4四肆]|1?9?[6六陆][0零]?[4四肆][^一-龥0-9a-z]?[捌八8][九玖9]|469891)(?!([\\[\\<\\>\\(\\)\\（\\）\\+\\-#0-9_a-z一-龥\\*\\.\\，\\,\\—\\…\\'%１２３４５６７８９０\\]]|\\s[0-9]))",
+                Pattern.CASE_INSENSITIVE));
+
+        patterns.add(Pattern.compile(
+                "^[\\s\\.\\,\\，。丶]*?[8八捌叭][\\s\\.\\,\\，。丶]*?[9九玖][\\s\\.\\,\\，。丶]*?[6六陆][\\s\\.\\,\\，。丶]*?[4四肆][\\s\\.\\,\\，。丶_]*?$",
+                Pattern.CASE_INSENSITIVE));
+
+        patterns.add(Pattern.compile(
+                "^[\\s\\.\\,\\，。丶]*?[8八捌叭][\\s\\.\\,\\，。丶]*?[9九玖][\\s\\.\\,\\，。丶]*?[6六陆][\\s\\.\\,\\，。丶]*?[4四肆][\\s\\.\\,\\，。丶]*?[8八捌叭][\\s\\.\\,\\，。丶]*?[9九玖][\\s\\.\\,\\，。丶]*?$",
+                Pattern.CASE_INSENSITIVE));
+
+        patterns.add(Pattern.compile(
+                "^[\\s\\.\\,\\，。丶]*?[6六陆][\\s\\.\\,\\，。丶]*?[4四肆][\\s\\.\\,\\，。丶]*?[8八捌叭][\\s\\.\\,\\，。丶]*?[9九玖][\\s\\.\\,\\，。丶]*?[6六陆][\\s\\.\\,\\，。丶]*?[4四肆][\\s\\.\\,\\，。丶]*?$",
+                Pattern.CASE_INSENSITIVE));
+
+        patterns.add(Pattern.compile(
+                "(?<![\\(a-z0-9#\\)])((liu|[6六])\\s*?(si|[4四])\\s*?(ba|[8八])\\s*?(jiu|[9九])|[六6陆][十0拾]?[四4肆][八8捌][十0拾]?[九9玖])(?![\\(_0-9a-z\\)])",
+                Pattern.CASE_INSENSITIVE));
+
+        patterns.add(Pattern.compile(
+                "^(?!.*?@[as]).*?(?<![\\[\\<\\>\\(\\)\\（\\）\\+\\-#0-9a-z\\\\\\{\\}\\/\\,\\s_。°￥¥%\\:\\.\\…\\，\\]])[8八][^一-龥a-z0-9]*?[9九][^一-龥a-z0-9]*?[6六][^一-龥a-z0-9]*?[4四](?![\\[\\<\\>\\(\\)\\（\\）\\+\\-#0-9a-z\\\\\\{\\}\\/\\,\\s。°￥¥%\\:\\.\\…\\，\\]])",
+                Pattern.CASE_INSENSITIVE));
+
+        patterns.add(Pattern.compile(
+                "(?<![a-z0-9#])(ba|[8八])\\s*?(jiu|[9九])\\s*?(liu|[6六])\\s*?(si|[4四])(?![0-9a-z])",
+                Pattern.CASE_INSENSITIVE));
+
+        patterns.add(Pattern.compile(
+                "(?<![a-z0-9#])[8八][s\\.\\,\\，丶]*?[9九][s\\.\\,\\，丶]*?l[s\\.\\,\\，丶]*?si?(?![0-9a-z])",
+                Pattern.CASE_INSENSITIVE));
+
+        patterns.add(Pattern.compile(
+                "6\\+3[^a-z一-龥0-9]*?3\\+3[^a-z一-龥0-9]*?2\\+2(?![0-9a-z])",
+                Pattern.CASE_INSENSITIVE));
+
+        patterns.add(Pattern.compile(
+                "[3].{0,3}?[7].{0,3}?[5].{0,3}?[4].{0,3}?[1一].{0,3}?[5]",
+                Pattern.CASE_INSENSITIVE));
+
+        patterns.add(Pattern.compile(
+                "(?<![0-9#])37[a-z\\s\\.\\,\\，。丶]*?年[0-9a-z\\s\\.\\,\\，。丶]*?前",
+                Pattern.CASE_INSENSITIVE));
+
+        patterns.add(Pattern.compile(
+                "(?<![0-9#])[4四]?[\\s\\.\\,\\，。丶]*?[2二][\\s\\.\\,\\，。丶]*?[6六][\\s\\.\\,\\，。丶]*?社论",
+                Pattern.CASE_INSENSITIVE));
+
+        patterns.add(Pattern.compile(
+                "^[^\\sa-zA-Z一-龥0-9]*?(?<![#])[3３三叁]([^一-龥0-9１２３４五六七八九零a-z=/]*?|十)[7七柒][^a-zA-Z一-龥0-9]*?$",
+                Pattern.CASE_INSENSITIVE));
+        }
+
+        public boolean matchText(String text) {
+            for (Pattern p : patterns) {
+                if (p.matcher(text).find()) {
+                    return true;
+                }
+            }
+            return false;
+        }
     }
 
     // --- 核心工具方法 ---
@@ -64,14 +157,14 @@ public class MinecraftMusicConverter {
     }
 
     /**
-     * 核心逻辑：获取安全的范围描述
+     * 核心逻辑：获取安全的范围描述（同步了贴合真实语境的优化算法）
      */
     private RangeResult getSafeRange(int start, int end, Set<Integer> allTimesInChain) {
         RangeResult res = new RangeResult();
         int finalStart = start;
         int finalEnd = end;
 
-        // 处理起始点：违禁且不连续
+        // 1. 基础违禁数值检查
         if (forbiddenValues.contains(start) && !isConsecutiveForbidden(start)) {
             finalStart = start - 1; 
             if (!allTimesInChain.contains(finalStart)) {
@@ -79,11 +172,53 @@ public class MinecraftMusicConverter {
             }
         }
 
-        // 处理结束点：违禁且不连续
         if (forbiddenValues.contains(end) && !isConsecutiveForbidden(end)) {
             finalEnd = end + 1;
             if (!allTimesInChain.contains(finalEnd)) {
                 res.corrections.add(finalEnd);
+            }
+        }
+
+        // 2. 贴合真实语境的网易敏感词检测与规避
+        if (detector != null) {
+            if (start == end) {
+                // 【单个数场景】：严格模拟实际生成的 "t=!s," 形式进行审查
+                String testStr = SCOREBOARD_NAME + "=!" + start + ",";
+                if (detector.matchText(testStr)) {
+                    // 触发敏感时，整体向前偏移 1 位，确保 finalStart 依然等于 finalEnd（保持单数语义）
+                    finalStart = start - 1;
+                    finalEnd = end - 1;
+                    if (!allTimesInChain.contains(finalStart)) {
+                        res.corrections.add(finalStart);
+                    }
+                }
+            } else {
+                // 【两个数区间场景】：严格模拟实际生成的 "t=!s..e," 形式进行审查
+                String testStr = SCOREBOARD_NAME + "=!" + start + ".." + end + ",";
+                if (detector.matchText(testStr)) {
+                    // 如果整个选择器区间串触发了敏感，则对前方数值进行偏移规避
+                    finalStart = start - 1;
+                    if (!allTimesInChain.contains(finalStart)) {
+                        res.corrections.add(finalStart);
+                    }
+                } else {
+                    // 如果整体安全，再分别确认在独立拆分或单端放入选择器时的边界安全性
+                    boolean startSensitive = detector.matchText(SCOREBOARD_NAME + "=!" + start + ",");
+                    boolean endSensitive = detector.matchText(SCOREBOARD_NAME + "=!" + end + ",");
+
+                    if (startSensitive) {
+                        finalStart = start - 1;
+                        if (!allTimesInChain.contains(finalStart)) {
+                            res.corrections.add(finalStart);
+                        }
+                    }
+                    if (endSensitive) {
+                        finalEnd = end + 1;
+                        if (!allTimesInChain.contains(finalEnd)) {
+                            res.corrections.add(finalEnd);
+                        }
+                    }
+                }
             }
         }
 
@@ -95,127 +230,168 @@ public class MinecraftMusicConverter {
         return res;
     }
 
+
     // 优化方案：引入预处理和更高效的集合处理
-private void writeCommandBlock(StringBuilder out, List<Integer> times, String inst, String pitch, String volume) {
-    if (times == null || times.isEmpty()) return;
+    private void writeCommandBlock(StringBuilder out, List<Integer> times, String inst, String pitch, String volume) {
+        if (times == null || times.isEmpty()) return;
 
-    // 1. 预排序后直接通过数组处理，避免 Iterator 性能损耗
-    Collections.sort(times);
-    
-    // 使用 BitSet 代替 HashSet<Integer> 记录 timeSet
-    // 假设时间戳不会超过 100万 (5万秒)，BitSet 极快且省空间
-    int maxTime = times.get(times.size() - 1);
-    BitSet timeBitSet = new BitSet(maxTime + 2);
-    for (int t : times) timeBitSet.set(t);
-
-    List<RangeResult> rangeResults = new ArrayList<>(times.size() / 2);
-    
-    int start = times.get(0);
-    int prev = start;
-    for (int i = 1; i < times.size(); i++) {
-        int cur = times.get(i);
-        if (cur != prev + 1) {
-            rangeResults.add(getSafeRangeFast(start, prev, timeBitSet));
-            start = cur;
-        }
-        prev = cur;
-    }
-    rangeResults.add(getSafeRangeFast(start, prev, timeBitSet));
-
-    // 2. 预缓存固定字符串
-    final String prefix = "/execute as @a[scores={" + SCOREBOARD_NAME + "=!" + (START_OFFSET - 1) + "}] at @s unless entity @s[scores={";
-    final String runPart = " run playsound " + inst + " @s ~ ~ ~ " + volume + " " + pitch;
-    final int baseLen = prefix.length() + 2 + runPart.length() + 10;
-
-    List<String> currentSelectors = new ArrayList<>();
-    Set<Integer> currentCorrections = new TreeSet<>();
-    int currentLen = baseLen;
-
-    for (RangeResult rr : rangeResults) {
-        int partLen = rr.selectorPart.length() + 1;
-        int correctionExtraLen = 0;
+        // 1. 预排序后直接通过数组处理
+        Collections.sort(times);
         
-        for (Integer c : rr.corrections) {
-            if (!currentCorrections.contains(c)) {
-                // 优化：查表或预估长度，避免 String.valueOf
-                correctionExtraLen += (SCOREBOARD_NAME.length() + (c > 1000 ? 5 : 3)); 
+        int maxTime = times.get(times.size() - 1);
+        BitSet timeBitSet = new BitSet(maxTime + 2);
+        for (int t : times) timeBitSet.set(t);
+
+        List<RangeResult> rangeResults = new ArrayList<>(times.size() / 2);
+        
+        int start = times.get(0);
+        int prev = start;
+        for (int i = 1; i < times.size(); i++) {
+            int cur = times.get(i);
+            if (cur != prev + 1) {
+                rangeResults.add(getSafeRangeFast(start, prev, timeBitSet));
+                start = cur;
+            }
+            prev = cur;
+        }
+        rangeResults.add(getSafeRangeFast(start, prev, timeBitSet));
+
+        // 2. 预缓存固定字符串
+        final String prefix = "/execute as @a[scores={" + SCOREBOARD_NAME + "=!" + (START_OFFSET - 1) + "}] at @s unless entity @s[scores={";
+        final String runPart = " run playsound " + inst + " @s ~ ~ ~ " + volume + " " + pitch;
+        final int baseLen = prefix.length() + 2 + runPart.length() + 10;
+
+        List<String> currentSelectors = new ArrayList<>();
+        Set<Integer> currentCorrections = new TreeSet<>();
+        int currentLen = baseLen;
+
+        for (RangeResult rr : rangeResults) {
+            int partLen = rr.selectorPart.length() + 1;
+            int correctionExtraLen = 0;
+            
+            for (Integer c : rr.corrections) {
+                if (!currentCorrections.contains(c)) {
+                    correctionExtraLen += (SCOREBOARD_NAME.length() + (c > 1000 ? 5 : 3)); 
+                }
+            }
+
+            if (MAX_CHARS > 0 && (currentLen + partLen + correctionExtraLen > MAX_CHARS)) {
+                flushCommand(out, prefix, currentSelectors, currentCorrections, runPart);
+                currentSelectors.clear();
+                currentCorrections.clear();
+                currentLen = baseLen;
+            }
+
+            currentSelectors.add(rr.selectorPart);
+            currentCorrections.addAll(rr.corrections);
+            currentLen += (partLen + correctionExtraLen);
+        }
+        flushCommand(out, prefix, currentSelectors, currentCorrections, runPart);
+    }
+
+    /**
+     * 【同步】配合 BitSet 的快速检查并应用敏感数优化
+     */
+    private RangeResult getSafeRangeFast(int start, int end, BitSet timeBitSet) {
+        RangeResult res = new RangeResult();
+        int finalStart = start;
+        int finalEnd = end;
+
+        // 1. 基础违禁数值检查
+        if (forbiddenValues.contains(start) && !isConsecutiveForbidden(start)) {
+            finalStart = start - 1;
+            if (!timeBitSet.get(finalStart)) res.corrections.add(finalStart);
+        }
+
+        if (forbiddenValues.contains(end) && !isConsecutiveForbidden(end)) {
+            finalEnd = end + 1;
+            if (!timeBitSet.get(finalEnd)) res.corrections.add(finalEnd);
+        }
+
+        // 2. 贴合真实语境的网易敏感词检测与规避（高并发快速版）
+        if (detector != null) {
+            if (start == end) {
+                // 【单个数场景】
+                String testStr = SCOREBOARD_NAME + "=!" + start + ",";
+                if (detector.matchText(testStr)) {
+                    finalStart = start - 1;
+                    finalEnd = end - 1;
+                    if (!timeBitSet.get(finalStart)) {
+                        res.corrections.add(finalStart);
+                    }
+                }
+            } else {
+                // 【两个数区间场景】
+                String testStr = SCOREBOARD_NAME + "=!" + start + ".." + end + ",";
+                if (detector.matchText(testStr)) {
+                    finalStart = start - 1;
+                    if (!timeBitSet.get(finalStart)) {
+                        res.corrections.add(finalStart);
+                    }
+                } else {
+                    boolean startSensitive = detector.matchText(SCOREBOARD_NAME + "=!" + start + ",");
+                    boolean endSensitive = detector.matchText(SCOREBOARD_NAME + "=!" + end + ",");
+
+                    if (startSensitive) {
+                        finalStart = start - 1;
+                        if (!timeBitSet.get(finalStart)) {
+                            res.corrections.add(finalStart);
+                        }
+                    }
+                    if (endSensitive) {
+                        finalEnd = end + 1;
+                        if (!timeBitSet.get(finalEnd)) {
+                            res.corrections.add(finalEnd);
+                        }
+                    }
+                }
             }
         }
 
-        if (MAX_CHARS > 0 && (currentLen + partLen + correctionExtraLen > MAX_CHARS)) {
-            flushCommand(out, prefix, currentSelectors, currentCorrections, runPart);
-            currentSelectors.clear();
-            currentCorrections.clear();
-            currentLen = baseLen;
+        if (finalStart == finalEnd) {
+            res.selectorPart = SCOREBOARD_NAME + "=!" + finalStart;
+        } else {
+            res.selectorPart = SCOREBOARD_NAME + "=!" + finalStart + ".." + finalEnd;
         }
-
-        currentSelectors.add(rr.selectorPart);
-        currentCorrections.addAll(rr.corrections);
-        currentLen += (partLen + correctionExtraLen);
+        return res;
     }
-    flushCommand(out, prefix, currentSelectors, currentCorrections, runPart);
-}
-
-// 配合 BitSet 的快速检查
-private RangeResult getSafeRangeFast(int start, int end, BitSet timeBitSet) {
-    RangeResult res = new RangeResult();
-    int finalStart = start;
-    int finalEnd = end;
-
-    if (forbiddenValues.contains(start) && !isConsecutiveForbidden(start)) {
-        finalStart = start - 1;
-        if (!timeBitSet.get(finalStart)) res.corrections.add(finalStart);
-    }
-
-    if (forbiddenValues.contains(end) && !isConsecutiveForbidden(end)) {
-        finalEnd = end + 1;
-        if (!timeBitSet.get(finalEnd)) res.corrections.add(finalEnd);
-    }
-
-    if (finalStart == finalEnd) {
-        res.selectorPart = SCOREBOARD_NAME + "=!" + finalStart;
-    } else {
-        res.selectorPart = SCOREBOARD_NAME + "=!" + finalStart + ".." + finalEnd;
-    }
-    return res;
-}
 
     private void flushCommand(StringBuilder out, String prefix,
-                          List<String> selectors,
-                          Set<Integer> corrections,
-                          String runPart) {
-    if (selectors.isEmpty()) return;
+                              List<String> selectors,
+                              Set<Integer> corrections,
+                              String runPart) {
+        if (selectors.isEmpty()) return;
 
-    out.append(prefix);
+        out.append(prefix);
 
-    for (int i = 0; i < selectors.size(); i++) {
-        out.append(selectors.get(i));
-        if (i < selectors.size() - 1) {
-            out.append(",");
-        }
-    }
-
-    out.append("}]");
-
-    if (!corrections.isEmpty()) {
-        out.append(" if entity @s[scores={");
-
-        int count = 0;
-        for (Integer c : corrections) {
-            out.append(SCOREBOARD_NAME)
-               .append("=!")
-               .append(c);
-
-            if (++count < corrections.size()) {
+        for (int i = 0; i < selectors.size(); i++) {
+            out.append(selectors.get(i));
+            if (i < selectors.size() - 1) {
                 out.append(",");
             }
         }
 
         out.append("}]");
-    }
 
-    out.append(runPart).append("\n");
-}
+        if (!corrections.isEmpty()) {
+            out.append(" if entity @s[scores={");
+
+            int count = 0;
+            for (Integer c : corrections) {
+                out.append(SCOREBOARD_NAME)
+                   .append("=!")
+                   .append(c);
+
+                if (++count < corrections.size()) {
+                    out.append(",");
+                }
+            }
+
+            out.append("}]");
+        }
+
+        out.append(runPart).append("\n");
+    }
 
     // --- 内部数据类 ---
 
@@ -229,8 +405,6 @@ private RangeResult getSafeRangeFast(int start, int end, BitSet timeBitSet) {
         Note(int t, String i, String p, String v) { this.time = t; this.inst = i; this.pitch = p; this.volume = v; }
     }
 
-    // --- 其余逻辑保持与原版结构一致 ---
-
     public String convertToString() {
         List<Note> notes = parseInputString(this.inputString);
         if (MODE == 1) return generateMode1(notes);
@@ -238,36 +412,36 @@ private RangeResult getSafeRangeFast(int start, int end, BitSet timeBitSet) {
     }
     
     public boolean convertToFile(File outputPath) {
-String result = convertToString();
-try (BufferedWriter bw = Files.newBufferedWriter(outputPath.toPath())) {
-bw.write(result);
-return true;
-} catch (IOException e) {
-e.printStackTrace();
-return false;
-}
-}
+        String result = convertToString();
+        try (BufferedWriter bw = Files.newBufferedWriter(outputPath.toPath())) {
+            bw.write(result);
+            return true;
+        } catch (IOException e) {
+            e.printStackTrace();
+            return false;
+        }
+    }
 
     private static final Pattern NOTE_PATTERN = Pattern.compile("^\\s*(\\d+)\\s+([A-Za-z0-9_.]+)\\s+([A-Za-z0-9_.]+)(?:\\s+([A-Za-z0-9_.]+))?\\s*$");
 
-private List<Note> parseInputString(String input) {
-    if (input == null || input.isEmpty()) return new ArrayList<>();
-    String[] lines = input.split("\\n");
-    List<Note> notes = new ArrayList<>(lines.length); // 预设容量
-    for (String line : lines) {
-        Matcher m = NOTE_PATTERN.matcher(line);
-        if (m.matches()) {
-            notes.add(new Note(
-                Integer.parseInt(m.group(1)), 
-                m.group(2), 
-                m.group(3), 
-                (m.group(4) != null ? m.group(4) : "1")
-            ));
+    private List<Note> parseInputString(String input) {
+        if (input == null || input.isEmpty()) return new ArrayList<>();
+        String[] lines = input.split("\\n");
+        List<Note> notes = new ArrayList<>(lines.length); 
+        for (String line : lines) {
+            Matcher m = NOTE_PATTERN.matcher(line);
+            if (m.matches()) {
+                notes.add(new Note(
+                    Integer.parseInt(m.group(1)), 
+                    m.group(2), 
+                    m.group(3), 
+                    (m.group(4) != null ? m.group(4) : "1")
+                ));
+            }
         }
+        notes.sort(Comparator.comparingInt(a -> a.time)); 
+        return notes;
     }
-    notes.sort(Comparator.comparingInt(a -> a.time)); // 使用 lambda 更简洁
-    return notes;
-}
 
     private String generateMode1(List<Note> notes) {
         StringBuilder sb = new StringBuilder();

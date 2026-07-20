@@ -147,13 +147,13 @@ class MainActivity : ComponentActivity() {
                     ) {  
                         composable("featureSelection") {  
                             val defaultFeatures = listOf(  
-                                FeatureItem("1", "【自动操作】", Icons.Default.Person, Color(0xFF0000), "scriptCommand"),  
-                                FeatureItem("2", "【音符盒方块】", Icons.Default.Analytics, Color(0xFF8C00), "musicCommand"),  
-                                FeatureItem("3", "【地图画转换】", Icons.Default.Analytics, Color(0xFFD700), "ImageTo"),  
-                                FeatureItem("4", "【结构生成器】", Icons.Default.Star, Color(0x00CC00), "StructureGenerator"),  
-                                FeatureItem("5", "【结构转命令】", Icons.Default.Star, Color(0x00CED1), "McStructure3DCommand"),
-                                FeatureItem("6", "【结构格式转换】", Icons.Default.Star, Color(0x1E90FF), "StructureConverterScreen"),
-                                FeatureItem("7", "【红石设置】", Icons.Default.Build, Color(0x9370DB), "settings"),
+                                FeatureItem("1", "【自动操作】", Icons.Default.Person, Color(0xFFFF0000), "scriptCommand"),  
+                                FeatureItem("2", "【音符盒方块】", Icons.Default.Analytics, Color(0xFFFF8C00), "musicCommand"),  
+                                FeatureItem("3", "【地图画转换】", Icons.Default.Analytics, Color(0xFFFFD700), "ImageTo"),  
+                                FeatureItem("4", "【结构生成器】", Icons.Default.Star, Color(0xFF00CC00), "StructureGenerator"),  
+                                FeatureItem("5", "【结构转命令】", Icons.Default.Star, Color(0xFF00CED1), "McStructure3DCommand"),
+                                FeatureItem("6", "【结构格式转换】", Icons.Default.Star, Color(0xFF1E90FF), "StructureConverterScreen"),
+                                FeatureItem("7", "【红石设置】", Icons.Default.Build, Color(0xFF9370DB), "settings"),
                             )  
 
                             FeatureSelectionScreen(  

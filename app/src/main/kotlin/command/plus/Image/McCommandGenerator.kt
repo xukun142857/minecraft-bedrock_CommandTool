@@ -9,7 +9,8 @@ import java.util.regex.Pattern
  * 我的世界 Minecraft 盔甲架命令生成器 (多实体增强版) - 已修复首行置位TP偏移Bug
  */
 class McCommandGenerator private constructor(
-    private val inputData: String,
+    private val rawMatrix: List<List<String>>?,
+    private val inputData: String?,
     private val scoreboardObj: String,
     private val entityName: String,
     private val charLimit: Int,
@@ -100,7 +101,8 @@ class McCommandGenerator private constructor(
 
     fun generate() {
         try {
-            var matrix = parseInput(inputData)
+            // 【优化】优先使用直接传入的矩阵，若没有才解析 inputData
+            var matrix = rawMatrix ?: parseInput(inputData ?: "")
             if (matrix.isEmpty()) {
                 callback(emptyList())
                 return
@@ -112,9 +114,11 @@ class McCommandGenerator private constructor(
             saveFile?.let { file ->
                 try {
                     file.parentFile?.mkdirs()
-                    FileOutputStream(file).use { fos ->
+                    // 【优化】使用 BufferedWriter 配合大缓冲区流式写入，避免全量内存开销
+                    file.bufferedWriter(Charsets.UTF_8, bufferSize = 65536).use { writer ->
                         commands.forEach { line ->
-                            fos.write((line + "\n").toByteArray(Charsets.UTF_8))
+                            writer.write(line)
+                            writer.newLine()
                         }
                     }
                 } catch (e: Exception) {
@@ -181,68 +185,69 @@ class McCommandGenerator private constructor(
     }
 
     private fun getSafeRange(start: Int, end: Int, allTimesInChain: Set<Int>): RangeResult {
-    var finalStart = start
-    var finalEnd = end
-    val res = RangeResult(selectorPart = "")
+        var finalStart = start
+        var finalEnd = end
+        val res = RangeResult(selectorPart = "")
 
-    // 1. 基础违禁数值检查（保留原有的基础黑名单过滤）
-    if (forbiddenScores.contains(start) && !isConsecutiveForbidden(start)) {
-        finalStart = start - 1
-        if (!allTimesInChain.contains(finalStart)) res.corrections.add(finalStart)
-    }
+        // 1. 基础违禁数值检查（保留基础黑名单过滤）
+        if (forbiddenScores.contains(start) && !isConsecutiveForbidden(start)) {
+            finalStart = start - 1
+            if (!allTimesInChain.contains(finalStart)) res.corrections.add(finalStart)
+        }
 
-    if (forbiddenScores.contains(end) && !isConsecutiveForbidden(end)) {
-        finalEnd = end + 1
-        if (!allTimesInChain.contains(finalEnd)) res.corrections.add(finalEnd)
-    }
+        if (forbiddenScores.contains(end) && !isConsecutiveForbidden(end)) {
+            finalEnd = end + 1
+            if (!allTimesInChain.contains(finalEnd)) res.corrections.add(finalEnd)
+        }
 
-    // 2. 贴合真实语境的网易敏感词检测与规避
-    if (detector != null) {
-        if (start == end) {
-            // 【单个数场景】：严格模拟实际生成的 "n=!s," 形式进行审查
-            val testStr = "$scoreboardObj=!$start,"
-            if (detector.matchText(testStr)) {
-                // 触发敏感时，整体向前偏移 1 位，确保 finalStart 依然等于 finalEnd（保持单数语义）
-                finalStart = start - 1
-                finalEnd = end - 1
-                if (!allTimesInChain.contains(finalStart)) {
-                    res.corrections.add(finalStart)
-                }
-            }
-        } else {
-            // 【两个数区间场景】：严格模拟实际生成的 "n=!s..e," 形式进行审查
-            val testStr = "$scoreboardObj=!$start..$end,"
-            if (detector.matchText(testStr)) {
-                // 如果整个选择器区间串触发了敏感（如 n=!64..89,），则对前方数值进行偏移规避
-                finalStart = start - 1
-                if (!allTimesInChain.contains(finalStart)) {
-                    res.corrections.add(finalStart)
+        // 2. 网易敏感词精细化检测与规避
+        if (detector != null) {
+            if (start == end) {
+                // 【单数场景】：严格检查 "obj=!s," 形式
+                val testStr = "$scoreboardObj=!$start,"
+                if (detector.matchText(testStr)) {
+                    finalStart = start - 1
+                    finalEnd = end - 1
+                    if (!allTimesInChain.contains(finalStart)) {
+                        res.corrections.add(finalStart)
+                    }
                 }
             } else {
-                // 如果整体安全，再分别确认在独立拆分或单端放入选择器时的边界安全性
+                // 【区间场景】：拆解单值敏感性与组合敏感性
+                val testStrRange = "$scoreboardObj=!$start..$end,"
                 val startSensitive = detector.matchText("$scoreboardObj=!$start,")
                 val endSensitive = detector.matchText("$scoreboardObj=!$end,")
-                
-                if (startSensitive) {
+                val rangeSensitive = detector.matchText(testStrRange)
+
+                if (rangeSensitive && !startSensitive && !endSensitive) {
+                    // 场景 A：单独看 start 和 end 都不违规，但组合起来（如 "bc..de"）触发敏感
+                    // 仅偏移前面的 start (start - 1) 打断组合
                     finalStart = start - 1
-                    if (!allTimesInChain.contains(finalStart)) res.corrections.add(finalStart)
-                }
-                if (endSensitive) {
-                    finalEnd = end + 1
-                    if (!allTimesInChain.contains(finalEnd)) res.corrections.add(finalEnd)
+                    if (!allTimesInChain.contains(finalStart)) {
+                        res.corrections.add(finalStart)
+                    }
+                } else {
+                    // 场景 B/C：单纯由 start 或 end 单值引起的违规，按需单独偏移
+                    if (startSensitive) {
+                        finalStart = start - 1
+                        if (!allTimesInChain.contains(finalStart)) res.corrections.add(finalStart)
+                    }
+                    if (endSensitive) {
+                        finalEnd = end + 1
+                        if (!allTimesInChain.contains(finalEnd)) res.corrections.add(finalEnd)
+                    }
                 }
             }
         }
-    }
 
-    // 3. 组装最终的选择器文本
-    res.selectorPart = if (finalStart == finalEnd) {
-        "$scoreboardObj=!$finalStart"
-    } else {
-        "$scoreboardObj=!$finalStart..$finalEnd"
+        // 3. 组装最终的选择器文本
+        res.selectorPart = if (finalStart == finalEnd) {
+            "$scoreboardObj=!$finalStart"
+        } else {
+            "$scoreboardObj=!$finalStart..$finalEnd"
+        }
+        return res
     }
-    return res
-}
 
     private fun isConsecutiveForbidden(valNum: Int): Boolean = forbiddenScores.contains(valNum - 1) || forbiddenScores.contains(valNum + 1)
 
@@ -476,7 +481,8 @@ class McCommandGenerator private constructor(
 
     class Builder {
         private var saveFile: File? = null
-        private var inputData: String = ""
+        private var rawMatrix: List<List<String>>? = null
+        private var inputData: String? = null
         private var scoreboardObj: String = "n"
         private var entityName: String = "C"
         private var charLimit: Int = 10000
@@ -495,6 +501,7 @@ class McCommandGenerator private constructor(
         private var enableExtraSensitiveOptimization: Boolean = true // 【新增】默认为 false
         private var callback: ((List<String>) -> Unit)? = null
 
+        fun setRawMatrix(matrix: List<List<String>>) = apply { this.rawMatrix = matrix }
         fun setInputData(data: String) = apply { this.inputData = data }
         fun setScoreboardObj(obj: String) = apply { this.scoreboardObj = obj }
         fun setEntityName(name: String) = apply { this.entityName = name }
@@ -526,7 +533,7 @@ class McCommandGenerator private constructor(
         fun build(): McCommandGenerator {
             requireNotNull(callback) { "必须设置 Callback" }
             return McCommandGenerator(
-                inputData, scoreboardObj, entityName, charLimit, startLength, startDepth, startWidth,
+                rawMatrix, inputData, scoreboardObj, entityName, charLimit, startLength, startDepth, startWidth,
                 mirrorHorizontal, mirrorVertical, innerAxis, innerStep, outerAxis, outerStep,
                 startScoreOffset, forbiddenScores, generationMultiplier, enableExtraSensitiveOptimization, saveFile, callback!!
             )

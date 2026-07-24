@@ -666,6 +666,8 @@ object McStructureExporter {
         data class ListTag(val items: List<NbtTag>) : NbtTag() { override val id: Byte = 9 }
         data class CompoundTag(val value: LinkedHashMap<String, NbtTag>) : NbtTag() { override val id: Byte = 10 }
         data class IntArrayTag(val value: IntArray) : NbtTag() { override val id: Byte = 11 }
+        // 在 NbtTag 密封类内部补充这一行 (ID 为 12)
+data class LongArrayTag(val value: LongArray) : NbtTag() { override val id: Byte = 12 }
     }
 
     private class NbtReader(private val input: InputStream) {
@@ -686,21 +688,13 @@ object McStructureExporter {
             7.toByte() -> NbtTag.ByteArrayTag(ByteArray(readIntLE()).also { input.read(it) })
             8.toByte() -> NbtTag.StringTag(readString())
             9.toByte() -> {
-                val subType = input.read().toByte()
-                val size = readIntLE()
-                
-                // 🚨【核心优化点】如果列表元素是 IntTag 且数量大于 10（过滤掉普通的 size 等小列表）
-                if (subType == 3.toByte() && size > 10) {
-                    // 直接分配原始 IntArray 连续读取，拒绝产生千万个包装对象！
-                    val arr = IntArray(size)
-                    for (i in 0 until size) {
-                        arr[i] = readIntLE()
-                    }
-                    NbtTag.IntArrayTag(arr) // 借用已有的 IntArrayTag 载体返回
-                } else {
-                    NbtTag.ListTag(List(size) { readPayload(subType) })
-                }
-            }
+    val subType = input.read().toByte()
+    val size = readIntLE()
+
+    // 严格按照 NBT 规范读取，ListTag 永远保持 ListTag，
+    // 不根据内容猜测为 IntArrayTag。
+    NbtTag.ListTag(List(size) { readPayload(subType) })
+}
             10.toByte() -> {
                 val map = LinkedHashMap<String, NbtTag>()
                 while (true) {

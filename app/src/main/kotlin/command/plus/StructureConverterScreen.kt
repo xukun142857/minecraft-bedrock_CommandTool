@@ -404,7 +404,7 @@ fun StructureConverterScreen(
                     OutlinedTextField(
                         value = targetVersionStr,
                         onValueChange = { targetVersionStr = it },
-                        label = { Text("目标游戏版本 (例如 1.26.30)") },
+                        label = { Text("目标游戏版本 (最好同传入文件版本)") },
                         placeholder = { Text("1.26.30") },
                         modifier = Modifier.fillMaxWidth()
                     )

@@ -8067,7 +8067,7 @@
                     "default_outputs": [
                         {
                             "chunker_state": "WATERLOGGED",
-                            "value": "true"
+                            "value": "false"
                         }
                     ],
                     "default_inputs": [],
@@ -8507,7 +8507,7 @@
                     "default_outputs": [
                         {
                             "chunker_state": "WATERLOGGED",
-                            "value": "true"
+                            "value": "false"
                         }
                     ],
                     "default_inputs": [],
@@ -9361,7 +9361,7 @@
                     "default_outputs": [
                         {
                             "chunker_state": "WATERLOGGED",
-                            "value": "true"
+                            "value": "false"
                         }
                     ],
                     "default_inputs": [],
@@ -10702,7 +10702,7 @@
                     "default_outputs": [
                         {
                             "chunker_state": "WATERLOGGED",
-                            "value": "true"
+                            "value": "false"
                         }
                     ],
                     "default_inputs": [],
@@ -11228,7 +11228,7 @@
                     "default_outputs": [
                         {
                             "chunker_state": "WATERLOGGED",
-                            "value": "true"
+                            "value": "false"
                         }
                     ],
                     "default_inputs": [],
@@ -17334,12 +17334,6 @@
         },
         "DIRT_PATH": {
             "java": [
-                {
-                    "identifier": "minecraft:grass_path",
-                    "group_ref": null,
-                    "group_key": null,
-                    "extra_states": null
-                },
                 {
                     "identifier": "minecraft:dirt_path",
                     "group_ref": null,

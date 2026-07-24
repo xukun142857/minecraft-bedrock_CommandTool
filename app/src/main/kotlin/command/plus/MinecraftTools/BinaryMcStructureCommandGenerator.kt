@@ -318,11 +318,21 @@ class NeteaseSensitiveDetector {
         }    
     }    
 
-    private fun adaptToBedrock(id: String, states: Map<String, Any?>, ctx: MatchContext): AppliedBlock {    
-        val converted = mappingEngine.convertJavaToBedrock(id, states, targetVersionTuple) ?: Pair(id, states)    
-        return AppliedBlock(id = converted.first, states = converted.second, assists = emptyList())    
-    }    
+private val isBedrockSourceFile: Boolean by lazy {
+    val ext = structureFile.extension.lowercase(Locale.ROOT)
+    ext == "mcstructure"
+}
 
+private fun adaptToBedrock(id: String, states: Map<String, Any?>, ctx: MatchContext): AppliedBlock {
+    // 如果源文件本身就是基岩版的 .mcstructure，直接保留原始的 ID 和 States，不走 Java->Bedrock 映射
+    if (isBedrockSourceFile) {
+        return AppliedBlock(id = id, states = states, assists = emptyList())
+    }
+    
+    // 只有 Java 版来源（Litematic / Java NBT）才执行方块映射
+    val converted = mappingEngine.convertJavaToBedrock(id, states, targetVersionTuple) ?: Pair(id, states)
+    return AppliedBlock(id = converted.first, states = converted.second, assists = emptyList())
+}
     private fun getStructureCoords(iVal: Int, mVal: Int, oVal: Int, w: Int, h: Int, d: Int): Triple<Int, Int, Int> {    
         var lx = 0; var ly = 0; var lz = 0    
         when (innerAxis) { Axis3D.X -> lx = iVal; Axis3D.Y -> ly = iVal; Axis3D.Z -> lz = iVal }    
@@ -1174,27 +1184,30 @@ class NeteaseSensitiveDetector {
     // 2. 贴合真实语境的敏感词检测与规避
     if (detector != null) {
         if (start == end) {
-            // 单个数场景：严格模拟 "n=!s," 形式进行审查
-            val testStr = "n=!$start,"
+            // 【单数场景】：严格模拟 "n=!s," 形式
+            val testStr = "$scoreboardObj=!$start,"
             if (detector.matchText(testStr)) {
+                // 保持单数语义，同步向前偏移 1 位
                 finalStart = start - 1
-                finalEnd = end + 1
-                if (!allTimesInChain.contains(finalStart)) res.corrections.add(finalStart)
-                if (!allTimesInChain.contains(finalEnd)) res.corrections.add(finalEnd)
+                finalEnd = end - 1
+                if (!allTimesInChain.contains(finalStart)) {
+                    res.corrections.add(finalStart)
+                }
             }
         } else {
-            // 两个数区间场景：严格模拟 "n=!s..e," 形式进行审查
-            val testStr = "n=!$start..$end,"
-            if (detector.matchText(testStr)) {
-                // 如果整个选择器区间串触发了敏感（如 n=!64..89,），则对前方数值进行偏移规避
+            // 【区间场景】：精准判断是单值敏感还是跨度组合敏感
+            val startSensitive = detector.matchText("$scoreboardObj=!$start,")
+            val endSensitive = detector.matchText("$scoreboardObj=!$end,")
+            val rangeSensitive = detector.matchText("$scoreboardObj=!$start..$end,")
+
+            if (rangeSensitive && !startSensitive && !endSensitive) {
+                // 仅跨度组合敏感（如 start 和 end 单独都没问题，但拼在一起触发了）：只偏移前面的 start 破坏组合
                 finalStart = start - 1
                 if (!allTimesInChain.contains(finalStart)) {
                     res.corrections.add(finalStart)
                 }
             } else {
-                // 如果整体安全，再分别确认在独立放入选择器时边界是否安全（如分开生成指令时的场景）
-                val startSensitive = detector.matchText("n=!$start,")
-                val endSensitive = detector.matchText("n=!$end,")
+                // 按单值敏感精确偏移：start 敏感则向前减，end 敏感则向后加
                 if (startSensitive) {
                     finalStart = start - 1
                     if (!allTimesInChain.contains(finalStart)) res.corrections.add(finalStart)
@@ -1207,10 +1220,15 @@ class NeteaseSensitiveDetector {
         }
     }
 
-    res.selectorPart = if (finalStart == finalEnd) "$scoreboardObj=!$finalStart" else "$scoreboardObj=!$finalStart..$finalEnd"
+    // 3. 组装选择器
+    res.selectorPart = if (finalStart == finalEnd) {
+        "$scoreboardObj=!$finalStart"
+    } else {
+        "$scoreboardObj=!$finalStart..$finalEnd"
+    }
     return res
 }
-    
+
     private fun isConsecutiveForbidden(valNum: Int): Boolean = forbiddenScores.contains(valNum - 1) || forbiddenScores.contains(valNum + 1)
 
     private fun buildTpCommands(scores: List<Int>, tpX: String, tpY: String, tpZ: String): List<String> {    

@@ -1585,7 +1585,7 @@ AsyncImage(
     contentDescription = "Generated Image",
     imageLoader = ImageLoader.Builder(LocalContext.current)
     .crossfade(true)
-    .bitmapConfig(Bitmap.Config.ARGB_8888)
+    .bitmapConfig(Bitmap.Config.RGB_565)
     .respectCacheHeaders(false)
     .build(),
     modifier = Modifier

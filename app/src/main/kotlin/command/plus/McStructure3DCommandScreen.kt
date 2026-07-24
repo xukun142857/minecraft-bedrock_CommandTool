@@ -1219,12 +1219,12 @@ private fun MappingAndVersionCard(
                 fontWeight = FontWeight.Bold
             )
 
-            // 基岩版目标版本
+            // 目标版本
             OutlinedTextField(
                 value = bedrockVersion,
                 onValueChange = onBedrockVersionChange,
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("基岩版目标版本 ") },
+                label = { Text("游戏版本(最好同传入文件版本)") },
                 singleLine = true,
                 supportingText = { Text("用于适配对应版本的方块状态结构") }
             )

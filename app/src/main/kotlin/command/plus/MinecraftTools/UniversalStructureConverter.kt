@@ -352,9 +352,15 @@ class UniversalStructureConverter(private val mappingDb: MappingDatabase) {
         require(volumeLong in 0..Int.MAX_VALUE.toLong()) {
             "结构体积过大或非法: $volumeLong"
         }
+        
+        
 
         val volume = volumeLong.toInt()
         val paletteMap = LinkedHashMap<McStructureExporter.BlockStateKey, Int>()
+        
+        val airKey = McStructureExporter.BlockStateKey("minecraft:air", emptyMap())
+    paletteMap[airKey] = 0
+    
         val indices = IntArray(volume)
 
         for (y in 0 until generic.height) {
@@ -370,6 +376,10 @@ class UniversalStructureConverter(private val mappingDb: MappingDatabase) {
                             states = it.second
                         }
                     }
+                    
+                    if (normalizeId(id) == "minecraft:air") {
+                    continue
+                }
 
                     val stringStates = states.mapValues { it.value.toString() }
                     val key = McStructureExporter.BlockStateKey(id, stringStates)
@@ -403,26 +413,25 @@ class UniversalStructureConverter(private val mappingDb: MappingDatabase) {
             McStructureExporter.NbtTag.CompoundTag(entries)
         }
 
-        val packedLongTags = packedLongs.map { McStructureExporter.NbtTag.LongTag(it) }
 
         val regionDetails = McStructureExporter.NbtTag.CompoundTag(linkedMapOf(
-            "Position" to McStructureExporter.NbtTag.CompoundTag(linkedMapOf(
-                "x" to McStructureExporter.NbtTag.IntTag(0),
-                "y" to McStructureExporter.NbtTag.IntTag(0),
-                "z" to McStructureExporter.NbtTag.IntTag(0)
-            )),
-            "Size" to McStructureExporter.NbtTag.CompoundTag(linkedMapOf(
-                "x" to McStructureExporter.NbtTag.IntTag(generic.width),
-                "y" to McStructureExporter.NbtTag.IntTag(generic.height),
-                "z" to McStructureExporter.NbtTag.IntTag(generic.depth)
-            )),
-            "BlockStatePalette" to McStructureExporter.NbtTag.ListTag(paletteTagList),
-            "BlockStates" to McStructureExporter.NbtTag.ListTag(packedLongTags),
-            "TileEntities" to McStructureExporter.NbtTag.ListTag(emptyList()),
-            "Entities" to McStructureExporter.NbtTag.ListTag(emptyList()),
-            "PendingBlockTicks" to McStructureExporter.NbtTag.ListTag(emptyList()),
-            "PendingFluidTicks" to McStructureExporter.NbtTag.ListTag(emptyList())
-        ))
+        "Position" to McStructureExporter.NbtTag.CompoundTag(linkedMapOf(
+            "x" to McStructureExporter.NbtTag.IntTag(0),
+            "y" to McStructureExporter.NbtTag.IntTag(0),
+            "z" to McStructureExporter.NbtTag.IntTag(0)
+        )),
+        "Size" to McStructureExporter.NbtTag.CompoundTag(linkedMapOf(
+            "x" to McStructureExporter.NbtTag.IntTag(generic.width),
+            "y" to McStructureExporter.NbtTag.IntTag(generic.height),
+            "z" to McStructureExporter.NbtTag.IntTag(generic.depth)
+        )),
+        "BlockStatePalette" to McStructureExporter.NbtTag.ListTag(paletteTagList),
+        "BlockStates" to McStructureExporter.NbtTag.LongArrayTag(packedLongs),
+        "TileEntities" to McStructureExporter.NbtTag.ListTag(emptyList()),
+        "Entities" to McStructureExporter.NbtTag.ListTag(emptyList()),
+        "PendingBlockTicks" to McStructureExporter.NbtTag.ListTag(emptyList()),
+        "PendingFluidTicks" to McStructureExporter.NbtTag.ListTag(emptyList())
+    ))
 
         val metadata = McStructureExporter.NbtTag.CompoundTag(linkedMapOf(
             "Author" to McStructureExporter.NbtTag.StringTag("PlusConverter"),
@@ -562,6 +571,10 @@ private class JavaNbtWriter(private val out: DataOutputStream) {
             is McStructureExporter.NbtTag.IntArrayTag -> {
                 out.writeInt(tag.value.size)
                 tag.value.forEach { out.writeInt(it) }
+            }
+            is McStructureExporter.NbtTag.LongArrayTag -> {
+                out.writeInt(tag.value.size)
+                tag.value.forEach { out.writeLong(it) }
             }
             else -> {}
         }

@@ -1,0 +1,70 @@
+private fun defaultInstrumentMap(): List<InstrumentDef> {
+    return listOf(
+        // ==========================================
+        // 1. 旋律乐器映射 (Melody Channels)
+        // ==========================================
+        // 钢琴 (0-7), 弦乐合奏 (40-47), 兜底音效 (120-127) -> harp
+        InstrumentDef(listOf(), (0..7).toList() + (40..47).toList() + (120..127).toList(), "note.harp", 54, false),
+        
+        // 敲击乐器 (8-15), 效果音 (96-103) -> pling (清脆八音盒效果)
+        InstrumentDef(listOf(), (8..15).toList() + (96..103).toList(), "note.pling", 78, false),
+        
+        // 风琴 (16-23), 木管乐器 (68-79) -> flute
+        InstrumentDef(listOf(), (16..23).toList() + (68..79).toList(), "note.flute", 66, false),
+        
+        // 各类吉他 (24-31) -> guitar
+        InstrumentDef(listOf(), (24..31).toList(), "note.guitar", 42, false),
+        
+        // 贝斯 (32-34), 拨弦贝斯 (36-37), 合成贝斯 (39) -> bass
+        InstrumentDef(listOf(), (32..34).toList() + listOf(36, 37, 39), "note.bass", 30, false),
+        
+        // 独奏弦乐/高音域 (48-55) -> chime
+        InstrumentDef(listOf(), (48..55).toList(), "note.chime", 78, false),
+        
+        // 【新增/调整】小号/法国号/主奏铜管 (56-59) -> note.trumpet
+        InstrumentDef(listOf(), (56..59).toList(), "note.trumpet", 54, false),
+        
+        // 【新增/调整】长号/大号/低音铜管 (60-63) -> note.trumpet_exposed (质感略沉的剥离状态小号)
+        InstrumentDef(listOf(), (60..63).toList(), "note.trumpet_exposed", 42, false),
+        
+        // 【新增/调整】萨克斯管/铜管混合 (64-67) -> note.trumpet_weathered (斑驳/风化的铜管质感)
+        InstrumentDef(listOf(), (64..67).toList(), "note.trumpet_weathered", 54, false),
+        
+        // 合成主音 Lead (80-87) -> bit (8Bit电子音色，表现力强)
+        InstrumentDef(listOf(), (80..87).toList(), "note.bit", 54, false),
+        
+        // 合成垫音 Pad (88-95) -> iron_xylophone
+        InstrumentDef(listOf(), (88..95).toList(), "note.iron_xylophone", 54, false),
+        
+        // 班卓琴 (105) -> banjo
+        InstrumentDef(listOf(), listOf(105), "note.banjo", 54, false),
+        
+        // 低音氛围/民族低音/古朴管乐 (35, 38, 104-111除105) -> didgeridoo
+        // 注：若想增加古朴铜管感，也可将部分民族管乐分给 note.trumpet_oxidized
+        InstrumentDef(listOf(), listOf(35, 38) + (104..111).filter { it != 105 }, "note.didgeridoo", 30, false),
+        
+        // 打击乐器特效音 (112-119) -> xylophone
+        InstrumentDef(listOf(), (112..119).toList(), "note.xylophone", 78, false),
+
+        // ==========================================
+        // 2. 打击乐器映射 (Drum Channel: Channel 9 / 第10轨)
+        // ==========================================
+        // 大鼓 (Bass Drum)
+        InstrumentDef(listOf(10), listOf(35, 36), "note.bd", 0, true),
+        // 军鼓 (Snare)
+        InstrumentDef(listOf(10), listOf(37, 38, 40), "note.snare", 0, true),
+        // 电子击打/镲片 (Bit/Hat)
+        InstrumentDef(listOf(10), listOf(42, 44), "note.bit", 0, true),
+        // 强音/叮当声 (Pling)
+        InstrumentDef(listOf(10), listOf(46), "note.pling", 0, true),
+        // 汤姆鼓/低音打击 (Tom/Low Bass)
+        InstrumentDef(listOf(10), listOf(41, 43, 45, 47, 48, 50), "note.bass", 0, true),
+        // 碰铃/响板 (Chime)
+        InstrumentDef(listOf(10), listOf(49, 51, 52, 55, 57), "note.chime", 0, true),
+        // 牛铃 (Cowbell)
+        InstrumentDef(listOf(10), listOf(56), "note.cow_bell", 0, true),
+        // 【可选扩充】金属鸣响/重打击镲 -> 可用 note.trumpet_oxidized 带来极具特色的金属碰撞感（如需的话）
+        // 木鱼/边缘打击 (Xylophone)
+        InstrumentDef(listOf(10), listOf(53, 54), "note.xylophone", 0, true)
+    )
+}

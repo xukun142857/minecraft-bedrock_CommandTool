@@ -23,3 +23,17 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+
+# 1. 保护你的 UserService 实现类不被混淆和移除构造函数
+-keep class command.plus.CommandUserService {
+    public <init>();
+    public <init>(android.content.Context);
+}
+
+# 2. 保护 AIDL 生成的接口及 Stub
+-keep class command.plus.ICommandService { *; }
+-keep class command.plus.ICommandService$Stub { *; }
+
+# 3. 保护 Shizuku 核心反射类
+-keep class moe.shizuku.starter.** { *; }

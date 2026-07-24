@@ -12,8 +12,10 @@ import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -29,11 +31,12 @@ import java.io.File
 import androidx.compose.ui.Alignment
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.Color
+
 private const val PREFS_NAME = "ScriptPrefs"
-
-
 
 @Composable
 fun ScriptCommandScreen(onBack: () -> Unit) {
@@ -73,25 +76,24 @@ fun ScriptCommandScreen(onBack: () -> Unit) {
     }
 }
 
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(onBack: () -> Unit, onNavigateToEditor: (File, String) -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val coroutineScope = rememberCoroutineScope()
     val prefs = remember { context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }
     
     // --- 目录定义与初始化 ---
     val scriptDir = remember { File(context.getExternalFilesDir(null), "script").apply { mkdirs() } }
-    val templateDir = remember { File(context.getExternalFilesDir(null), "templates").apply { mkdirs() } }
     val dir1 = remember { File(context.getExternalFilesDir(null), "MusicOutput").apply { mkdirs() } }
     val dir2 = remember { File(context.getExternalFilesDir(null), "PixelArtResult").apply { mkdirs() } }
+    val dir3 = remember { File(context.getExternalFilesDir(null), "McStructure3D").apply { mkdirs() } }
+    val knownDirectories = remember { listOf(dir1, dir2, dir3) }
 
-    // 内置默认脚本模板
+    // 在脚本目录下，初始化一个内置默认脚本文件（若不存在）
     LaunchedEffect(Unit) {
-        val defaultTemplate = File(templateDir, "内置通用模板.txt")
-        if (!defaultTemplate.exists()) {
+        val defaultScript = File(scriptDir, "默认内置脚本.txt")
+        if (!defaultScript.exists()) {
             val defaultContent = """
 .if(${'$'}isBlockType == "") // 判断指令输入流程是否结束
 .fToast("流程结束") // 发出流程结束提示
@@ -142,35 +144,36 @@ fun HomeScreen(onBack: () -> Unit, onNavigateToEditor: (File, String) -> Unit) {
 .exeAction(2250,160,2250,160,50) // 点击命令方块退出键
 .end
             """.trimIndent()
-            try { defaultTemplate.writeText(defaultContent) } catch (e: Exception) {}
+            try { defaultScript.writeText(defaultContent) } catch (e: Exception) {}
         }
     }
 
     // --- 响应式文件列表监测 ---
-    val knownMusicFiles = rememberDirectoryFiles(listOf(dir1, dir2))
+    val knownMusicFiles = rememberDirectoryFiles(knownDirectories)
     val knownScriptFiles = rememberDirectoryFiles(listOf(scriptDir))
-    val knownTemplateFiles = rememberDirectoryFiles(listOf(templateDir))
 
-    // --- 使用提供的扩展函数持久化状态 ---
+    // --- 使用扩展函数持久化状态 ---
     var sourceMode by rememberPreference("source_mode", 0, prefs)
     var selectedKnownMusicPath by rememberPreference("selected_known_music_path", "", prefs)
     var linkInput by rememberPreference("link_input", "", prefs)
+    
+    // --- 文件夹筛选状态 ---
+    var selectedFolderFilter by remember { mutableStateOf("ALL") }
 
     var scriptSelectionMode by rememberPreference("script_mode", 0, prefs)
     var selectedDefaultScriptPath by rememberPreference("default_script", "", prefs)
     var specificScriptPath by rememberPreference("specific_path", "", prefs)
-    
-    var selectedTemplatePath by rememberPreference("selected_template_path", "", prefs)
 
-    // --- 底部弹窗控制 ---
-    var showBottomSheetType by remember { mutableStateOf("") } // "create_template" 或 "generate_script"
-    var inputNameText by remember { mutableStateOf("") }
-    var locationMode by remember { mutableIntStateOf(0) } 
-    var customPath by remember { mutableStateOf("") }
+    // --- 新建脚本弹窗控制 ---
+    var showCreateDialog by remember { mutableStateOf(false) }
+    var newScriptNameInput by remember { mutableStateOf("") }
 
-    if (showBottomSheetType.isNotEmpty()) {
+    if (showCreateDialog) {
         ModalBottomSheet(
-            onDismissRequest = { showBottomSheetType = "" },
+            onDismissRequest = { 
+                showCreateDialog = false 
+                newScriptNameInput = ""
+            },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         ) {
             Column(
@@ -181,76 +184,37 @@ fun HomeScreen(onBack: () -> Unit, onNavigateToEditor: (File, String) -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 Text(
-                    text = if (showBottomSheetType == "create_template") "创建新模板" else "基于当前模板生成运行脚本",
+                    text = "新建脚本文件",
                     style = MaterialTheme.typography.titleLarge
                 )
                 
                 OutlinedTextField(
-                    value = inputNameText,
-                    onValueChange = { inputNameText = it },
-                    label = { Text(if (showBottomSheetType == "create_template") "模板名称 (无需加 .txt)" else "脚本文件名称 (无需加 .txt)") },
-                    modifier = Modifier.fillMaxWidth()
+                    value = newScriptNameInput,
+                    onValueChange = { newScriptNameInput = it },
+                    label = { Text("脚本文件名 (无需填写 .txt)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
                 )
-
-                if (showBottomSheetType == "generate_script") {
-                    Text("生成脚本存储位置：", style = MaterialTheme.typography.bodyMedium)
-                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            RadioButton(selected = locationMode == 0, onClick = { locationMode = 0 })
-                            Text("内部默认目录")
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            RadioButton(selected = locationMode == 1, onClick = { locationMode = 1 })
-                            Text("自定义绝对路径")
-                        }
-                    }
-
-                    if (locationMode == 1) {
-                        OutlinedTextField(
-                            value = customPath,
-                            onValueChange = { customPath = it },
-                            label = { Text("请输入绝对路径") },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                }
 
                 Button(
                     onClick = {
-                        if (inputNameText.isBlank()) return@Button
-                        val finalName = if (inputNameText.lowercase().endsWith(".txt")) inputNameText else "$inputNameText.txt"
-                        
-                        if (showBottomSheetType == "create_template") {
-                            // 场景 A: 创建新模板并进入编辑器
-                            val newTemplateFile = File(templateDir, finalName)
-                            showBottomSheetType = ""
-                            inputNameText = ""
-                            onNavigateToEditor(newTemplateFile, "// 在此配置新的规则模板\n")
+                        if (newScriptNameInput.isBlank()) return@Button
+                        val finalName = if (newScriptNameInput.lowercase().endsWith(".txt")) {
+                            newScriptNameInput
                         } else {
-                            // 场景 B: 读取选中的模板内容，写入到指定的脚本文件目录
-                            val currentTemplateFile = File(selectedTemplatePath)
-                            if (currentTemplateFile.exists()) {
-                                val templateContent = currentTemplateFile.readText()
-                                val targetScriptFile = if (locationMode == 0) {
-                                    File(scriptDir, finalName)
-                                } else {
-                                    File(customPath, finalName)
-                                }
-                                try {
-                                    targetScriptFile.parentFile?.mkdirs()
-                                    targetScriptFile.writeText(templateContent)
-                                    Toast.makeText(context, "脚本文件生成成功！", Toast.LENGTH_SHORT).show()
-                                } catch (e: Exception) {
-                                    Toast.makeText(context, "生成失败: ${e.message}", Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                            showBottomSheetType = ""
-                            inputNameText = ""
+                            "$newScriptNameInput.txt"
                         }
+                        
+                        val newScriptFile = File(scriptDir, finalName)
+                        showCreateDialog = false
+                        newScriptNameInput = ""
+                        
+                        // 直接打开编辑器编辑新脚本
+                        onNavigateToEditor(newScriptFile, "// 在此配置您的自动化逻辑脚本\n")
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("确认提交并处理")
+                    Text("确认并开始编辑")
                 }
             }
         }
@@ -348,7 +312,7 @@ fun HomeScreen(onBack: () -> Unit, onNavigateToEditor: (File, String) -> Unit) {
                         val fileName = fileToRun.absolutePath
 
                         if (fileName.isBlank() || !fileToRun.exists() || !fileName.lowercase().endsWith(".txt")) {
-                            Toast.makeText(context, "无效的执行脚本文件，请先前往模板管理器生成", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "无效的脚本文件，请先新建或选择有效的脚本", Toast.LENGTH_SHORT).show()
                             return@Button
                         }
                         service.showFloatingWindow(fileName)
@@ -360,7 +324,7 @@ fun HomeScreen(onBack: () -> Unit, onNavigateToEditor: (File, String) -> Unit) {
                 Text(if (isWindowShown) "关闭悬浮窗" else "开启悬浮窗")
             }
 
-            // --- 卡片 1: 选择指令文件 ---
+            // --- 卡片 1: 选择指令文件 (改进后的多文件夹区分 UI) ---
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
@@ -369,22 +333,207 @@ fun HomeScreen(onBack: () -> Unit, onNavigateToEditor: (File, String) -> Unit) {
                     Text("选择指令文件", style = MaterialTheme.typography.titleMedium)
                     Spacer(modifier = Modifier.height(8.dp))
                     DropdownMenuBox(options = sourceOptions, selectedIndex = sourceMode, onOptionSelected = { sourceMode = it })
+                    
                     if (sourceMode == 1) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        val displayOptions = if (knownMusicFiles.isEmpty()) listOf("无") else knownMusicFiles.map { File(it).name }
-                        LaunchedEffect(knownMusicFiles) {
-                            if (knownMusicFiles.isNotEmpty() && selectedKnownMusicPath.isBlank()) selectedKnownMusicPath = knownMusicFiles[0]
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        if (knownMusicFiles.isEmpty()) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Folder,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.outline
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "未在对应目录中找到任何 .txt 指令文件",
+                                        fontSize = 13.sp,
+                                        color = MaterialTheme.colorScheme.outline
+                                    )
+                                }
+                            }
+                        } else {
+                            val folderNames = remember(knownDirectories) { knownDirectories.map { it.name } }
+                            val filteredFiles = remember(knownMusicFiles, selectedFolderFilter) {
+                                if (selectedFolderFilter == "ALL") {
+                                    knownMusicFiles
+                                } else {
+                                    knownMusicFiles.filter { File(it).parentFile?.name == selectedFolderFilter }
+                                }
+                            }
+
+                            // 当筛选改变导致已选文件不在范围内时，自动校准为范围内第一个文件
+                            LaunchedEffect(filteredFiles) {
+                                if (filteredFiles.isNotEmpty() && !filteredFiles.contains(selectedKnownMusicPath)) {
+                                    selectedKnownMusicPath = filteredFiles[0]
+                                }
+                            }
+
+                            // 1. 文件夹 Filter Chips (支持滑动)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                FilterChip(
+                                    selected = selectedFolderFilter == "ALL",
+                                    onClick = { selectedFolderFilter = "ALL" },
+                                    label = { Text("全部 (${knownMusicFiles.size})") },
+                                    leadingIcon = if (selectedFolderFilter == "ALL") {
+                                        { Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                                    } else null
+                                )
+
+                                folderNames.forEach { folderName ->
+                                    val count = knownMusicFiles.count { File(it).parentFile?.name == folderName }
+                                    FilterChip(
+                                        selected = selectedFolderFilter == folderName,
+                                        onClick = { selectedFolderFilter = folderName },
+                                        label = { Text("$folderName ($count)") },
+                                        leadingIcon = if (selectedFolderFilter == folderName) {
+                                            { Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                                        } else null
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            // 2. 带文件夹来源徽章的文件下拉选择器
+                            var dropdownExpanded by remember { mutableStateOf(false) }
+                            val selectedFileObj = File(selectedKnownMusicPath)
+                            val selectedFileName = if (selectedFileObj.exists() && selectedKnownMusicPath.isNotBlank()) selectedFileObj.name else "无选中文件"
+                            val selectedFileFolder = if (selectedFileObj.exists()) selectedFileObj.parentFile?.name ?: "" else ""
+
+                            ExposedDropdownMenuBox(
+                                expanded = dropdownExpanded,
+                                onExpandedChange = { dropdownExpanded = !dropdownExpanded }
+                            ) {
+                                OutlinedTextField(
+                                    value = selectedFileName,
+                                    onValueChange = {},
+                                    readOnly = true,
+                                    label = { Text("已选指令文件") },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Default.InsertDriveFile,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    },
+                                    trailingIcon = {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.padding(end = 4.dp)
+                                        ) {
+                                            if (selectedFileFolder.isNotBlank()) {
+                                                Surface(
+                                                    color = MaterialTheme.colorScheme.secondaryContainer,
+                                                    shape = RoundedCornerShape(4.dp)
+                                                ) {
+                                                    Text(
+                                                        text = selectedFileFolder,
+                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                                                    )
+                                                }
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                            }
+                                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = dropdownExpanded)
+                                        }
+                                    },
+                                    modifier = Modifier
+                                        .menuAnchor()
+                                        .fillMaxWidth()
+                                )
+
+                                ExposedDropdownMenu(
+                                    expanded = dropdownExpanded,
+                                    onDismissRequest = { dropdownExpanded = false }
+                                ) {
+                                    if (filteredFiles.isEmpty()) {
+                                        DropdownMenuItem(
+                                            text = { Text("该目录下暂无文件", color = MaterialTheme.colorScheme.outline) },
+                                            onClick = { dropdownExpanded = false }
+                                        )
+                                    } else {
+                                        filteredFiles.forEach { filePath ->
+                                            val file = File(filePath)
+                                            val parentFolder = file.parentFile?.name ?: ""
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Row(
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                            modifier = Modifier.weight(1f)
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = Icons.Default.InsertDriveFile,
+                                                                contentDescription = null,
+                                                                modifier = Modifier.size(18.dp),
+                                                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                                            )
+                                                            Spacer(modifier = Modifier.width(8.dp))
+                                                            Text(
+                                                                text = file.name,
+                                                                style = MaterialTheme.typography.bodyMedium,
+                                                                maxLines = 1
+                                                            )
+                                                        }
+
+                                                        Surface(
+                                                            color = MaterialTheme.colorScheme.tertiaryContainer,
+                                                            shape = RoundedCornerShape(4.dp),
+                                                            modifier = Modifier.padding(start = 8.dp)
+                                                        ) {
+                                                            Text(
+                                                                text = parentFolder,
+                                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                                style = MaterialTheme.typography.labelSmall,
+                                                                color = MaterialTheme.colorScheme.onTertiaryContainer
+                                                            )
+                                                        }
+                                                    }
+                                                },
+                                                onClick = {
+                                                    selectedKnownMusicPath = filePath
+                                                    dropdownExpanded = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
-                        val selectedIndex = displayOptions.indexOf(File(selectedKnownMusicPath).name).takeIf { it >= 0 } ?: 0
-                        DropdownMenuBox(options = displayOptions, selectedIndex = selectedIndex, onOptionSelected = { selectedKnownMusicPath = if (displayOptions[it] == "无") "" else knownMusicFiles[it] })
                     } else if (sourceMode == 2) {
                         Spacer(modifier = Modifier.height(8.dp))
-                        OutlinedTextField(value = linkInput, onValueChange = { linkInput = it }, label = { Text("输入外部链接") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                        OutlinedTextField(
+                            value = linkInput,
+                            onValueChange = { linkInput = it },
+                            label = { Text("输入外部链接") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
                     }
                 }
             }
 
-            // --- 卡片 2: 运行脚本选择器 (仅用于指定运行实例) ---
+            // --- 卡片 2: 运行脚本选择器 ---
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
@@ -395,99 +544,89 @@ fun HomeScreen(onBack: () -> Unit, onNavigateToEditor: (File, String) -> Unit) {
                     DropdownMenuBox(options = scriptSourceOptions, selectedIndex = scriptSelectionMode, onOptionSelected = { scriptSelectionMode = it })
                     Spacer(modifier = Modifier.height(8.dp))
                     if (scriptSelectionMode == 0) {
-                        val displayOptions = if (knownScriptFiles.isEmpty()) listOf("无") else knownScriptFiles.map { File(it).name }
+                        val displayOptions = if (knownScriptFiles.isEmpty()) listOf("无脚本") else knownScriptFiles.map { File(it).name }
                         LaunchedEffect(knownScriptFiles) {
                             if (knownScriptFiles.isNotEmpty() && selectedDefaultScriptPath.isBlank()) selectedDefaultScriptPath = knownScriptFiles[0]
                         }
                         val selectedIndex = displayOptions.indexOf(File(selectedDefaultScriptPath).name).takeIf { it >= 0 } ?: 0
-                        DropdownMenuBox(options = displayOptions, selectedIndex = selectedIndex, onOptionSelected = { selectedDefaultScriptPath = if (displayOptions[it] == "无") "" else knownScriptFiles[it] })
+                        DropdownMenuBox(options = displayOptions, selectedIndex = selectedIndex, onOptionSelected = { selectedDefaultScriptPath = if (displayOptions[it] == "无脚本") "" else knownScriptFiles[it] })
                     } else {
                         OutlinedTextField(value = specificScriptPath, onValueChange = { specificScriptPath = it }, label = { Text("输入绝对路径 (.txt)") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                     }
                 }
             }
 
-            // --- 新增卡片 3: 脚本规则模板管理器 ---
+            // --- 卡片 3: 脚本管理器 (直接对 scriptDir 目录中的脚本文件进行操作) ---
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                 elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
             ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("脚本模板管理器", style = MaterialTheme.typography.titleMedium)
+                    Text("脚本文件管理器", style = MaterialTheme.typography.titleMedium)
                     
-                    val templateDisplayOptions = if (knownTemplateFiles.isEmpty()) listOf("暂无模板") else knownTemplateFiles.map { File(it).name }
-                    LaunchedEffect(knownTemplateFiles) {
-                        if (knownTemplateFiles.isNotEmpty() && selectedTemplatePath.isBlank()) selectedTemplatePath = knownTemplateFiles[0]
+                    val scriptDisplayOptions = if (knownScriptFiles.isEmpty()) listOf("暂无脚本") else knownScriptFiles.map { File(it).name }
+                    
+                    // 当已知文件变化时校准持久化选择
+                    LaunchedEffect(knownScriptFiles) {
+                        if (knownScriptFiles.isNotEmpty() && selectedDefaultScriptPath.isBlank()) {
+                            selectedDefaultScriptPath = knownScriptFiles[0]
+                        }
                     }
-                    val selectedTemplateIndex = templateDisplayOptions.indexOf(File(selectedTemplatePath).name).takeIf { it >= 0 } ?: 0
+                    val selectedScriptIndex = scriptDisplayOptions.indexOf(File(selectedDefaultScriptPath).name).takeIf { it >= 0 } ?: 0
                     
-                    // 模板下拉选择菜单
+                    // 下拉选择脚本
                     DropdownMenuBox(
-                        options = templateDisplayOptions,
-                        selectedIndex = selectedTemplateIndex,
+                        options = scriptDisplayOptions,
+                        selectedIndex = selectedScriptIndex,
                         onOptionSelected = {
-                            selectedTemplatePath = if (templateDisplayOptions[it] == "暂无模板") "" else knownTemplateFiles[it]
+                            selectedDefaultScriptPath = if (scriptDisplayOptions[it] == "暂无脚本") "" else knownScriptFiles[it]
                         }
                     )
 
-                    // 模板操作功能按钮网格排版
+                    // 脚本修改与删除操作按钮
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(
                             onClick = {
-                                val file = File(selectedTemplatePath)
+                                val file = File(selectedDefaultScriptPath)
                                 if (file.exists()) {
                                     onNavigateToEditor(file, file.readText())
                                 } else {
-                                    Toast.makeText(context, "请先选择一个有效模板", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "请先选择一个有效脚本", Toast.LENGTH_SHORT).show()
                                 }
                             },
                             modifier = Modifier.weight(1f),
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                         ) {
-                            Text("修改选中模板", fontSize = 12.sp)
+                            Text("修改选中脚本", fontSize = 12.sp)
                         }
 
                         Button(
                             onClick = {
-                                val file = File(selectedTemplatePath)
-                                if (file.exists() && file.name != "内置通用模板.txt") {
+                                val file = File(selectedDefaultScriptPath)
+                                if (file.exists()) {
                                     file.delete()
-                                    selectedTemplatePath = ""
-                                    Toast.makeText(context, "模板已删除", Toast.LENGTH_SHORT).show()
+                                    selectedDefaultScriptPath = ""
+                                    Toast.makeText(context, "脚本已删除", Toast.LENGTH_SHORT).show()
                                 } else {
-                                    Toast.makeText(context, "无法删除该项或未选模板", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "请先选择需要删除的脚本", Toast.LENGTH_SHORT).show()
                                 }
                             },
                             modifier = Modifier.weight(1f),
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                         ) {
-                            Text("删除模板", fontSize = 12.sp)
+                            Text("删除脚本", fontSize = 12.sp)
                         }
                     }
 
                     HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f))
 
-                    // 基于模板实例化文件的操作
-                    Button(
-                        onClick = {
-                            if (selectedTemplatePath.isBlank() || !File(selectedTemplatePath).exists()) {
-                                Toast.makeText(context, "请先选定一个基础模板", Toast.LENGTH_SHORT).show()
-                                return@Button
-                            }
-                            showBottomSheetType = "generate_script"
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
-                    ) {
-                        Text("选用此模板生成运行脚本文件")
-                    }
-
+                    // 新建脚本按钮
                     OutlinedButton(
-                        onClick = { showBottomSheetType = "create_template" },
+                        onClick = { showCreateDialog = true },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("＋ 新建空白规则模板")
+                        Text("＋ 新建空白脚本文件")
                     }
                 }
             }
@@ -601,5 +740,3 @@ fun requestPermissions(context: Context) {
     val accessibilityIntent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
     context.startActivity(accessibilityIntent)
 }
-
-// （其余底层的 DropdownMenuBox, rememberDirectoryFiles, requestPermissions 保持不变）

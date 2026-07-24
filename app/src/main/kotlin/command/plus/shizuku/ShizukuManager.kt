@@ -7,12 +7,11 @@ import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import rikka.shizuku.Shizuku
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import rikka.shizuku.Shizuku
 
 object ShizukuManager {
 
@@ -23,14 +22,16 @@ object ShizukuManager {
         READY,
         DEAD
     }
+
     @Volatile
-private var lastResult: String? = null
+    private var lastResult: String? = null
 
     private const val REQUEST_CODE = 1001
-    private const val BIND_TIMEOUT_MS = 1000L
+    // 💡 优化 1：延长超时时间至 5 秒（冷启动 UserService 需要时间）
+    private const val BIND_TIMEOUT_MS = 5000L 
     private const val MAX_BIND_RETRY = 2
-    private var userServiceArgs: Shizuku.UserServiceArgs? = null
 
+    private var userServiceArgs: Shizuku.UserServiceArgs? = null
     private lateinit var appContext: Context
     private val mainHandler = Handler(Looper.getMainLooper())
     private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -39,6 +40,7 @@ private var lastResult: String? = null
     private var commandService: ICommandService? = null
     private var pendingCommand: String? = null
 
+    @Volatile
     private var currentState: State = State.NO_BINDER
     private var bindTimeoutRunnable: Runnable? = null
     private var bindRetryCount = 0
@@ -59,8 +61,11 @@ private var lastResult: String? = null
     }
 
     private val binderReceivedListener = Shizuku.OnBinderReceivedListener {
+    // 当 Shizuku 服务真正准备好时触发
+    mainHandler.post {
         ensureReadyOrRequest()
     }
+}
 
     private val binderDeadListener = Shizuku.OnBinderDeadListener {
         commandService = null
@@ -68,20 +73,13 @@ private var lastResult: String? = null
         bindingInProgress = false
         emitState(State.DEAD)
     }
-    
-    fun getCurrentState(): State {
-    return when {
-        !Shizuku.pingBinder() -> State.NO_BINDER
-        Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED -> State.NEED_PERMISSION
-        commandService != null -> State.READY
-        else -> State.BINDING
-    }
-}
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, service: IBinder) {
+            // 💡 绑定成功，及时取消超时 Watchdog
             cancelBindTimeout()
             bindingInProgress = false
+            bindRetryCount = 0
 
             commandService = ICommandService.Stub.asInterface(service)
             emitState(State.READY)
@@ -100,18 +98,23 @@ private var lastResult: String? = null
         }
     }
 
-    fun init(context: Context) {
-        if (initialized) return
-        initialized = true
+    
 
-        appContext = context.applicationContext
+fun init(context: Context) {
+    if (initialized) return
+    initialized = true
 
-        Shizuku.addRequestPermissionResultListener(permissionListener)
-        Shizuku.addBinderReceivedListener(binderReceivedListener)
-        Shizuku.addBinderDeadListener(binderDeadListener)
+    appContext = context.applicationContext
 
+    Shizuku.addRequestPermissionResultListener(permissionListener)
+    Shizuku.addBinderReceivedListener(binderReceivedListener)
+    Shizuku.addBinderDeadListener(binderDeadListener)
+
+    // 💡 只有在 ping 得通时才尝试绑定，否则静默等待 BinderReceived 回调
+    if (Shizuku.pingBinder()) {
         ensureReadyOrRequest()
     }
+}
 
     fun release() {
         if (!initialized) return
@@ -120,41 +123,43 @@ private var lastResult: String? = null
         cancelBindTimeout()
         bindingInProgress = false
 
-        try {
-            // 你的版本如果是别的签名，就把这里改成对应的 unbindUserService 调用
-            userServiceArgs?.let {
-    try {
-        Shizuku.unbindUserService(it, serviceConnection, true)
-    } catch (_: Throwable) {}
-}
-        } catch (_: Throwable) {
+        userServiceArgs?.let { args ->
+            try {
+                Shizuku.unbindUserService(args, serviceConnection, true)
+            } catch (_: Throwable) {}
         }
 
         try {
             Shizuku.removeRequestPermissionResultListener(permissionListener)
             Shizuku.removeBinderReceivedListener(binderReceivedListener)
             Shizuku.removeBinderDeadListener(binderDeadListener)
-        } catch (_: Throwable) {
-        }
-
-        // 如果你希望这个单例后面还能继续复用，就不要 cancel 掉 ioScope。
-        // ioScope.cancel()
+        } catch (_: Throwable) {}
     }
 
     fun runWhenReady(command: String) {
         pendingCommand = command
-        ensureReadyOrRequest()
+        if (currentState == State.READY) {
+            pendingCommand = null
+            executeNow(command)
+        } else {
+            ensureReadyOrRequest()
+        }
     }
 
     fun isConnected(): Boolean = commandService != null
 
-    private fun ensureReadyOrRequest() {
-        if (Shizuku.isPreV11()) {
-            emitState(State.NO_BINDER)
-            return
+    fun getCurrentState(): State {
+        return when {
+            !Shizuku.pingBinder() -> State.NO_BINDER
+            Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED -> State.NEED_PERMISSION
+            commandService != null -> State.READY
+            bindingInProgress -> State.BINDING
+            else -> currentState
         }
+    }
 
-        if (!Shizuku.pingBinder()) {
+    private fun ensureReadyOrRequest() {
+        if (Shizuku.isPreV11() || !Shizuku.pingBinder()) {
             emitState(State.NO_BINDER)
             return
         }
@@ -169,55 +174,56 @@ private var lastResult: String? = null
     }
 
     private fun bindUserServiceIfPossible() {
-        if (!Shizuku.pingBinder()) {
-            emitState(State.NO_BINDER)
-            return
-        }
-
-        if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
-            emitState(State.NEED_PERMISSION)
-            Shizuku.requestPermission(REQUEST_CODE)
-            return
-        }
-
-        if (commandService != null) {
-            emitState(State.READY)
-            pendingCommand?.let { command ->
-                pendingCommand = null
-                executeNow(command)
-            }
-            return
-        }
-
-        if (bindingInProgress) return
-
-        bindingInProgress = true
-        emitState(State.BINDING)
-
-        val args = Shizuku.UserServiceArgs(
-    ComponentName(appContext, CommandUserService::class.java)
-)
-    .processNameSuffix(":shizuku")
-    .daemon(false)
-    .version(BuildConfig.VERSION_CODE)
-
-userServiceArgs = args
-            .processNameSuffix(":shizuku")
-            .daemon(false)
-            .version(BuildConfig.VERSION_CODE)
-            // 如果你的版本支持 tag，建议加上
-            // .tag("command_user_service")
-
-        startBindTimeoutWatchdog()
-
-        try {
-            Shizuku.bindUserService(args, serviceConnection)
-        } catch (e: Throwable) {
-            cancelBindTimeout()
-            bindingInProgress = false
-            handleBindFailure(e)
-        }
+    if (!Shizuku.pingBinder()) {
+        emitState(State.NO_BINDER)
+        return
     }
+
+    if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
+        emitState(State.NEED_PERMISSION)
+        Shizuku.requestPermission(REQUEST_CODE)
+        return
+    }
+
+    if (commandService != null) {
+        emitState(State.READY)
+        pendingCommand?.let { command ->
+            pendingCommand = null
+            executeNow(command)
+        }
+        return
+    }
+
+    if (bindingInProgress) return
+
+    bindingInProgress = true
+    emitState(State.BINDING)
+
+    // 💡 1. 采用动态 version，防止 Shizuku 误认为 Service 已存活而不触发新的 Connection
+    val dynamicVersion = (System.currentTimeMillis() and 0x7FFFFFFF).toInt()
+
+    val args = Shizuku.UserServiceArgs(
+        ComponentName(appContext, CommandUserService::class.java)
+    )
+        .processNameSuffix("shizuku")
+        .daemon(false)
+        .version(dynamicVersion)
+
+    userServiceArgs = args
+
+    startBindTimeoutWatchdog()
+
+    try {
+        // 💡 2. 绑定前清理残留的连接
+        runCatching { Shizuku.unbindUserService(args, serviceConnection, true) }
+        
+        Shizuku.bindUserService(args, serviceConnection)
+    } catch (e: Throwable) {
+        cancelBindTimeout()
+        bindingInProgress = false
+        handleBindFailure(e)
+    }
+}
 
     private fun startBindTimeoutWatchdog() {
         cancelBindTimeout()
@@ -225,23 +231,20 @@ userServiceArgs = args
         bindTimeoutRunnable = Runnable {
             if (!bindingInProgress || commandService != null) return@Runnable
 
-            try {
-                userServiceArgs?.let {
-    try {
-        Shizuku.unbindUserService(it, serviceConnection, true)
-    } catch (_: Throwable) {}
-}
-            } catch (_: Throwable) {
+            userServiceArgs?.let { args ->
+                try {
+                    Shizuku.unbindUserService(args, serviceConnection, true)
+                } catch (_: Throwable) {}
             }
 
             commandService = null
             bindingInProgress = false
 
+            // 💡 优化 3：超时重试时，直接再次尝试绑定，不要误切到 NEED_PERMISSION 状态
             if (bindRetryCount < MAX_BIND_RETRY) {
                 bindRetryCount++
-                emitState(State.NEED_PERMISSION)
                 mainHandler.post {
-                    ensureReadyOrRequest()
+                    bindUserServiceIfPossible()
                 }
             } else {
                 emitState(State.DEAD)
@@ -263,32 +266,29 @@ userServiceArgs = args
     }
 
     private fun executeNow(command: String) {
-    val service = commandService
-    if (service == null) {
-        pendingCommand = command
-        bindUserServiceIfPossible()
-        return
-    }
-
-    ioScope.launch {
-        val result = runCatching {
-            service.exec(command)
-        }.getOrElse { e ->
-            "ERROR: ${e.message}"
+        val service = commandService
+        if (service == null) {
+            pendingCommand = command
+            bindUserServiceIfPossible()
+            return
         }
 
-        // ✅ 更新缓存
-        lastResult = result
+        ioScope.launch {
+            val result = runCatching {
+                service.exec(command)
+            }.getOrElse { e ->
+                "ERROR: ${e.message}"
+            }
 
-        mainHandler.post {
-            onCommandOutput?.invoke(result)
+            lastResult = result
+
+            mainHandler.post {
+                onCommandOutput?.invoke(result)
+            }
         }
     }
-}
 
-fun getLastResult(): String? {
-    return lastResult
-}
+    fun getLastResult(): String? = lastResult
 
     private fun emitState(state: State) {
         currentState = state

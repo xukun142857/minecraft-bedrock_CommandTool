@@ -727,7 +727,7 @@ private fun candidateMatchesCanonical(
     val outStates = if (tgtGroup != null) {
         renderTarget(targetSide, tgtGroup, canonical)
     } else {
-        emptyMap()
+        inputStates
     }
 
     val finalId = Utils.normalizeId(targetBlock.identifier) ?: targetBlock.identifier
@@ -899,10 +899,12 @@ private fun candidateMatchesCanonical(
         }
 
         for (pair in pairList) {
-            if (Utils.deepEquals(pair.input, needle)) {
-                return Utils.normalizeDeep(pair.output)
-            }
+        // 增加转为字符串后的比较，防止 Int(2) 和 String("2") 或 Double(2.0) 比对失败
+        if (Utils.deepEquals(pair.input, needle) || 
+            Utils.valueToText(pair.input) == Utils.valueToText(needle)) {
+            return Utils.normalizeDeep(pair.output)
         }
+    }
 
         val table = if (forward) typeEntry.forward else typeEntry.reverse
         val keys = when (needle) {

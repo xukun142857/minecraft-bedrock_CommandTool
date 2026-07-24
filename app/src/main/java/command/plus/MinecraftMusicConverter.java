@@ -156,81 +156,6 @@ public class MinecraftMusicConverter {
         return forbiddenValues.contains(val - 1) || forbiddenValues.contains(val + 1);
     }
 
-    /**
-     * 核心逻辑：获取安全的范围描述（同步了贴合真实语境的优化算法）
-     */
-    private RangeResult getSafeRange(int start, int end, Set<Integer> allTimesInChain) {
-        RangeResult res = new RangeResult();
-        int finalStart = start;
-        int finalEnd = end;
-
-        // 1. 基础违禁数值检查
-        if (forbiddenValues.contains(start) && !isConsecutiveForbidden(start)) {
-            finalStart = start - 1; 
-            if (!allTimesInChain.contains(finalStart)) {
-                res.corrections.add(finalStart);
-            }
-        }
-
-        if (forbiddenValues.contains(end) && !isConsecutiveForbidden(end)) {
-            finalEnd = end + 1;
-            if (!allTimesInChain.contains(finalEnd)) {
-                res.corrections.add(finalEnd);
-            }
-        }
-
-        // 2. 贴合真实语境的网易敏感词检测与规避
-        if (detector != null) {
-            if (start == end) {
-                // 【单个数场景】：严格模拟实际生成的 "t=!s," 形式进行审查
-                String testStr = SCOREBOARD_NAME + "=!" + start + ",";
-                if (detector.matchText(testStr)) {
-                    // 触发敏感时，整体向前偏移 1 位，确保 finalStart 依然等于 finalEnd（保持单数语义）
-                    finalStart = start - 1;
-                    finalEnd = end - 1;
-                    if (!allTimesInChain.contains(finalStart)) {
-                        res.corrections.add(finalStart);
-                    }
-                }
-            } else {
-                // 【两个数区间场景】：严格模拟实际生成的 "t=!s..e," 形式进行审查
-                String testStr = SCOREBOARD_NAME + "=!" + start + ".." + end + ",";
-                if (detector.matchText(testStr)) {
-                    // 如果整个选择器区间串触发了敏感，则对前方数值进行偏移规避
-                    finalStart = start - 1;
-                    if (!allTimesInChain.contains(finalStart)) {
-                        res.corrections.add(finalStart);
-                    }
-                } else {
-                    // 如果整体安全，再分别确认在独立拆分或单端放入选择器时的边界安全性
-                    boolean startSensitive = detector.matchText(SCOREBOARD_NAME + "=!" + start + ",");
-                    boolean endSensitive = detector.matchText(SCOREBOARD_NAME + "=!" + end + ",");
-
-                    if (startSensitive) {
-                        finalStart = start - 1;
-                        if (!allTimesInChain.contains(finalStart)) {
-                            res.corrections.add(finalStart);
-                        }
-                    }
-                    if (endSensitive) {
-                        finalEnd = end + 1;
-                        if (!allTimesInChain.contains(finalEnd)) {
-                            res.corrections.add(finalEnd);
-                        }
-                    }
-                }
-            }
-        }
-
-        if (finalStart == finalEnd) {
-            res.selectorPart = SCOREBOARD_NAME + "=!" + finalStart;
-        } else {
-            res.selectorPart = SCOREBOARD_NAME + "=!" + finalStart + ".." + finalEnd;
-        }
-        return res;
-    }
-
-
     // 优化方案：引入预处理和更高效的集合处理
     private void writeCommandBlock(StringBuilder out, List<Integer> times, String inst, String pitch, String volume) {
         if (times == null || times.isEmpty()) return;
@@ -293,68 +218,72 @@ public class MinecraftMusicConverter {
      * 【同步】配合 BitSet 的快速检查并应用敏感数优化
      */
     private RangeResult getSafeRangeFast(int start, int end, BitSet timeBitSet) {
-        RangeResult res = new RangeResult();
-        int finalStart = start;
-        int finalEnd = end;
+    RangeResult res = new RangeResult();
+    int finalStart = start;
+    int finalEnd = end;
 
-        // 1. 基础违禁数值检查
-        if (forbiddenValues.contains(start) && !isConsecutiveForbidden(start)) {
-            finalStart = start - 1;
-            if (!timeBitSet.get(finalStart)) res.corrections.add(finalStart);
-        }
+    // 1. 基础违禁数值检查
+    if (forbiddenValues.contains(start) && !isConsecutiveForbidden(start)) {
+        finalStart = start - 1;
+        if (!timeBitSet.get(finalStart)) res.corrections.add(finalStart);
+    }
 
-        if (forbiddenValues.contains(end) && !isConsecutiveForbidden(end)) {
-            finalEnd = end + 1;
-            if (!timeBitSet.get(finalEnd)) res.corrections.add(finalEnd);
-        }
+    if (forbiddenValues.contains(end) && !isConsecutiveForbidden(end)) {
+        finalEnd = end + 1;
+        if (!timeBitSet.get(finalEnd)) res.corrections.add(finalEnd);
+    }
 
-        // 2. 贴合真实语境的网易敏感词检测与规避（高并发快速版）
-        if (detector != null) {
-            if (start == end) {
-                // 【单个数场景】
-                String testStr = SCOREBOARD_NAME + "=!" + start + ",";
-                if (detector.matchText(testStr)) {
+    // 2. 贴合真实语境的网易敏感词检测与规避（高并发快速版）
+    if (detector != null) {
+        if (start == end) {
+            // 【单个数场景】：同步向前偏移，保持单数语义
+            String testStr = SCOREBOARD_NAME + "=!" + start + ",";
+            if (detector.matchText(testStr)) {
+                finalStart = start - 1;
+                finalEnd = end - 1;
+                if (!timeBitSet.get(finalStart)) {
+                    res.corrections.add(finalStart);
+                }
+            }
+        } else {
+            // 【两个数区间场景】：拆解单端敏感性与组合敏感性
+            boolean startSensitive = detector.matchText(SCOREBOARD_NAME + "=!" + start + ",");
+            boolean endSensitive = detector.matchText(SCOREBOARD_NAME + "=!" + end + ",");
+            String testStrRange = SCOREBOARD_NAME + "=!" + start + ".." + end + ",";
+            boolean rangeSensitive = detector.matchText(testStrRange);
+
+            if (rangeSensitive && !startSensitive && !endSensitive) {
+                // 仅跨度组合触发敏感（单独看 start/end 都没问题）：只偏移 start (-1) 打断组合
+                finalStart = start - 1;
+                if (!timeBitSet.get(finalStart)) {
+                    res.corrections.add(finalStart);
+                }
+            } else {
+                // 按单端敏感精确偏移：start 敏感向前减，end 敏感向后加
+                if (startSensitive) {
                     finalStart = start - 1;
-                    finalEnd = end - 1;
                     if (!timeBitSet.get(finalStart)) {
                         res.corrections.add(finalStart);
                     }
                 }
-            } else {
-                // 【两个数区间场景】
-                String testStr = SCOREBOARD_NAME + "=!" + start + ".." + end + ",";
-                if (detector.matchText(testStr)) {
-                    finalStart = start - 1;
-                    if (!timeBitSet.get(finalStart)) {
-                        res.corrections.add(finalStart);
-                    }
-                } else {
-                    boolean startSensitive = detector.matchText(SCOREBOARD_NAME + "=!" + start + ",");
-                    boolean endSensitive = detector.matchText(SCOREBOARD_NAME + "=!" + end + ",");
-
-                    if (startSensitive) {
-                        finalStart = start - 1;
-                        if (!timeBitSet.get(finalStart)) {
-                            res.corrections.add(finalStart);
-                        }
-                    }
-                    if (endSensitive) {
-                        finalEnd = end + 1;
-                        if (!timeBitSet.get(finalEnd)) {
-                            res.corrections.add(finalEnd);
-                        }
+                if (endSensitive) {
+                    finalEnd = end + 1;
+                    if (!timeBitSet.get(finalEnd)) {
+                        res.corrections.add(finalEnd);
                     }
                 }
             }
         }
-
-        if (finalStart == finalEnd) {
-            res.selectorPart = SCOREBOARD_NAME + "=!" + finalStart;
-        } else {
-            res.selectorPart = SCOREBOARD_NAME + "=!" + finalStart + ".." + finalEnd;
-        }
-        return res;
     }
+
+    // 3. 组装选择器
+    if (finalStart == finalEnd) {
+        res.selectorPart = SCOREBOARD_NAME + "=!" + finalStart;
+    } else {
+        res.selectorPart = SCOREBOARD_NAME + "=!" + finalStart + ".." + finalEnd;
+    }
+    return res;
+}
 
     private void flushCommand(StringBuilder out, String prefix,
                               List<String> selectors,

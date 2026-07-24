@@ -2,6 +2,8 @@
 本软件中所有生成到内部存储的文件均在 /storage/emulated/0/Android/data/command.plus/files/ 下方的不同目录
 [END]
 
+本软件所有源码及最新版本: https://github.com/xukun142857/minecraft-bedrock_CommandTool
+
 [TITLE] 脚本自动化操作指南 [END]
 
 [WARN] 请务必授予“管理所有文件”权限及“无障碍服务”权限，否则脚本无法驱动自动点击。 [END]
